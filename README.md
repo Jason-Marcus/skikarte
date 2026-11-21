@@ -10,7 +10,8 @@ Jedes Skigebiet in 3D – mit echter Steilheit, Routenplaner, Treffpunkt für Fr
 - Lifte als 3D-Modelle je Typ (Gondel, Sessel, Pendelbahn, Schlepplift) mit Stützen, Stationen und fahrenden Kabinen
 - Routenplaner: Start und Ziel antippen oder eigenen Standort nehmen, Schwierigkeit wählen (nur blau / bis rot / auch schwarz), Schritte antippen zum Hinfliegen
 - Navigation mit GPS: mitfahrende 3D-Ansicht mit Abbiege-Hinweisen, Neuberechnung bei Abweichung, Testfahrt mit simuliertem GPS zum Ausprobieren zu Hause
-- Treffpunkt: bis zu 4 Personen, eigene Route für jeden, „fairen Treffpunkt“ finden
+- Hütten & Restaurants an den Pisten (OpenStreetMap) mit Öffnungszeiten, „Route hierher“ und „Als Treffpunkt“
+- Treffpunkt: bis zu 4 Personen, eigene Route für jeden, „fairen Treffpunkt“ finden (auch Hütten)
 - Offline: geladene Skigebiete werden gespeichert und funktionieren ohne Internet („Meine Skigebiete“)
 - Wetter für Tal und Berg mit 3-Tage-Vorschau
 - Eigene Linie übers Gelände messen
@@ -18,6 +19,7 @@ Jedes Skigebiet in 3D – mit echter Steilheit, Routenplaner, Treffpunkt für Fr
 ## Datenquellen
 - Pisten & Lifte: © OpenStreetMap-Mitwirkende (ODbL), über [OpenSkiMap](https://openskimap.org) bzw. Overpass API
 - Höhendaten: Terrain Tiles (Mapzen, AWS Open Data – Quellen siehe [tilezen/joerd](https://github.com/tilezen/joerd))
+- Hütten & Restaurants: © OpenStreetMap-Mitwirkende (ODbL), über Overpass API – Öffnungszeiten ohne Gewähr
 - Wetter: [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0)
 
 Gefälle und Fahrzeiten sind Schätzwerte, keine offiziellen Pistenangaben.

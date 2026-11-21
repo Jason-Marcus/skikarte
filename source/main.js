@@ -514,6 +514,7 @@ function pick(cx, cy) {
 function nearest(x, z) {
   const thr = Math.max(25, camera.position.distanceTo(controls.target) * 0.006);
   let best = null, bd = thr;
+  if (showHuts) for (const h of huts) { const dd = Math.hypot(h.x - x, h.z - z) * 0.7; if (dd < bd) { bd = dd; best = { hut: h }; } }
   for (const r of runs) for (const q of r.s) { const dd = Math.hypot(q.x - x, q.z - z); if (dd < bd) { bd = dd; best = { run: r }; } }
   for (const l of lifts) for (const q of l.path) { const dd = Math.hypot(q.x - x, q.z - z) * 1.15; if (dd < bd) { bd = dd; best = { lift: l }; } }
   return best;
@@ -528,7 +529,8 @@ canvas.addEventListener('pointerup', e => {
   if (routing) { routeTap(hit[0], hit[1]); return; }
   if (measuring) { pts.push(hit); rebuildMeasure(); updateUi(); return; }
   const n = nearest(hit[0], hit[1]);
-  if (n?.run) { pinGroup.clear(); showRun(n.run); }
+  if (n?.hut) { showHut(n.hut); }
+  else if (n?.run) { pinGroup.clear(); showRun(n.run); }
   else if (n?.lift) { pinGroup.clear(); showLift(n.lift); }
   else showInfo(hit[0], hit[1]);
 });
@@ -758,7 +760,8 @@ function routeTap(x, z) {
   if (tab === 'meet') return meetTap(x, z);
   const id = snap(x, z);
   if (id === null) { $('rt-sum').innerHTML = '<div class="rt-hint warn">Bitte näher an einer Piste oder einem Lift tippen.</div>'; return; }
-  if (route.a === null || route.b !== null) { route.a = id; route.b = null; }
+  if (route.a === null && route.b !== null) route.a = id;
+  else if (route.a === null || route.b !== null) { route.a = id; route.b = null; }
   else route.b = id;
   computeRoute();
 }
@@ -796,6 +799,7 @@ function pathTo(sp, dst) {
 const stationOf = new Map();
 lifts.forEach(l => { stationOf.set(l.top, { l, top: true }); stationOf.set(l.bottom, { l, top: false }); });
 function placeName(id) {
+  const hu = hutAtNode.get(id); if (hu) return (HUT_IC[hu.type] || '🍴') + ' ' + (hu.name || HUT_DE[hu.type] || 'Hütte');
   const st = stationOf.get(id), n = G.nodes[id];
   if (st) return (st.top ? 'Bergstation ' : 'Talstation ') + (st.l.name || LIFT_DE[st.l.cls] || 'Lift');
   const o = nodeOwner[id];
@@ -907,12 +911,13 @@ function fairMeet() {
   const ps = meet.people.filter(p => p.node !== null); if (ps.length < 2) return;
   const sps = ps.map(p => sssp(p.node, p.rank, route.allowDown));
   let best = null, bt = Infinity, bs = Infinity;
-  for (const l of lifts) for (const c of [l.top, l.bottom]) {
-    let mx = 0, sum = 0; for (const sp of sps) { const d = sp.dist[c]; mx = Math.max(mx, d); sum += d; }
+  const cands = []; for (const l of lifts) cands.push([l.top, 0], [l.bottom, 0]); for (const h of huts) cands.push([h.node, -90]);   // huts: up to 1.5 min bonus
+  for (const [c, bonus] of cands) {
+    let mx = bonus, sum = 0; for (const sp of sps) { const d = sp.dist[c]; mx = Math.max(mx, d + bonus); sum += d; }
     if (mx < bt - 30 || (Math.abs(mx - bt) <= 30 && sum < bs)) { bt = mx; bs = sum; best = c; }
   }
   if (best === null || !isFinite(bt)) { meet.fairMsg = 'Keine Liftstation gefunden, die alle mit ihrer Schwierigkeit erreichen.'; renderMeetPanel(); return; }
-  meet.node = best; meet.fairMsg = `Fairster Treffpunkt: alle sind spätestens nach ca. ${fmtMin(bt)} dort.`;
+  meet.node = best; meet.fairMsg = `Fairster Treffpunkt: alle sind spätestens nach ca. ${fmtMin(bt + (hutAtNode.has(best) ? 90 : 0))} dort.`;
   meet.target = nextTarget(); computeMeet();
 }
 async function copyMeet() {
@@ -979,10 +984,10 @@ function updateBadges(dist) {
   const W2 = window.innerWidth, H2 = window.innerHeight, unit = H2 / (2 * Math.tan(camera.fov * Math.PI / 360));
   const lim = Math.max(2500, dist * 1.7), cand = [];
   for (const sp of badgeGroup.children) {
-    sp.visible = false;
+    sp.visible = false; if (sp.userData.hut && !showHuts) continue;
     const d = camera.position.distanceTo(sp.position); if (d > lim) continue;
     _bp.copy(sp.position).project(camera); if (_bp.z > 1 || Math.abs(_bp.x) > 1.1 || Math.abs(_bp.y) > 1.1) continue;
-    const k = THREE.MathUtils.clamp(2600 / d, 0.62, 1.12), hgt = 0.034 * k;      // smaller when far away
+    const k = THREE.MathUtils.clamp(2600 / d, 0.62, 1.12), hgt = (sp.userData.hut ? 0.027 : 0.034) * k;      // smaller when far away
     sp.scale.set(hgt * sp.userData.a, hgt, 1);
     const hp = hgt * unit, wp = hp * sp.userData.a, cx = (_bp.x + 1) / 2 * W2, cy = (1 - _bp.y) / 2 * H2;
     cand.push({ sp, d, r: [cx - wp / 2 - 3, cy - hp / 2 - 3, cx + wp / 2 + 3, cy + hp / 2 + 3], prio: sp.userData.prio - d * 50 });
@@ -1211,6 +1216,75 @@ $('rt-me').onclick = () => {
 };
 $('nv-stop').onclick = stopNav;
 
+
+// ---------- HUTS / RESTAURANTS ----------
+const HUT_DE = { alpine_hut: 'Berghütte', wilderness_hut: 'Hütte', restaurant: 'Restaurant', cafe: 'Café', bar: 'Bar', pub: 'Kneipe', fast_food: 'Imbiss', biergarten: 'Biergarten' };
+const HUT_IC = { alpine_hut: '🏠', wilderness_hut: '🏠', restaurant: '🍴', cafe: '☕', bar: '🍺', pub: '🍺', fast_food: '🍟', biergarten: '🍺' };
+const huts = []; const hutAtNode = new Map(); const hutGroup = new THREE.Group(); scene.add(hutGroup);
+var showHuts = true;
+function setHuts(list) {
+  huts.length = 0; hutGroup.clear(); hutAtNode.clear();
+  for (const b of [...badgeGroup.children]) if (b.userData.hut) badgeGroup.remove(b);
+  for (const h of list) {
+    const [x, z] = toXZ(h.lon, h.lat); if (!inside(x, z)) continue;
+    // only places on the mountain: close to a piste or lift
+    let best = null, bd = 260; for (const [id, d] of near(x, z, 260)) if (d < bd) { bd = d; best = id; }
+    if (best === null) continue;
+    const hh = heightAt(x, z);
+    if (bd > 120 && hh < VALLEY_H - 250) continue;          // valley restaurants only if right at the piste
+    huts.push({ ...h, x, z, h: hh, node: best, dist: bd });
+  }
+  // dedupe same name within 80 m
+  for (let i = huts.length - 1; i >= 0; i--) for (let j = 0; j < i; j++) if (huts[i].name && huts[i].name === huts[j].name && Math.hypot(huts[i].x - huts[j].x, huts[i].z - huts[j].z) < 80) { huts.splice(i, 1); break; }
+  const m4 = [];
+  for (const h of huts) {
+    hutAtNode.set(h.node, h);
+    _m.compose(_v.set(h.x, meshHeight(h.x, h.z) - 1, h.z), _q.setFromAxisAngle(_up, (h.lon * 1000) % 6.28), _s.set(1, 1, 1)); m4.push(_m.clone());
+    // name tag
+    const label = (HUT_IC[h.type] || '🍴') + ' ' + (h.name ? (h.name.length > 22 ? h.name.slice(0, 21) + '…' : h.name) : HUT_DE[h.type] || 'Hütte');
+    const c = document.createElement('canvas'), fs = 40, ctx = c.getContext('2d'); ctx.font = `650 ${fs}px system-ui, sans-serif`;
+    const w = Math.ceil(ctx.measureText(label).width) + fs * 0.9, hgt = fs * 1.45; c.width = w + 6; c.height = hgt + 6; ctx.font = `650 ${fs}px system-ui, sans-serif`;
+    ctx.fillStyle = '#7a4a2a'; ctx.beginPath(); ctx.roundRect(1, 1, w + 4, hgt + 4, 14); ctx.fill();
+    ctx.fillStyle = '#fff8ee'; ctx.beginPath(); ctx.roundRect(4, 4, w - 2, hgt - 2, 11); ctx.fill();
+    ctx.fillStyle = '#3b2414'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(label, c.width / 2, c.height / 2 + 2);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, sizeAttenuation: false, depthWrite: false, depthTest: false, transparent: true }));
+    sp.position.set(h.x, meshHeight(h.x, h.z) + 55, h.z); sp.renderOrder = 11;
+    sp.userData = { hut: h, a: c.width / c.height, prio: 3e6 + (h.name ? 1e5 : 0) };
+    badgeGroup.add(sp);
+  }
+  if (m4.length) {
+    const roof = new THREE.CylinderGeometry(0.62, 0.62, 1.06, 3, 1); roof.rotateZ(Math.PI / 2); roof.rotateY(Math.PI / 2); roof.scale(1, 0.5, 1);
+    const geo = mergeGeometries([part(new THREE.BoxGeometry(14, 6, 10), 0x8a5a36, 0, 3, 0), part(new THREE.BoxGeometry(14.2, 2.2, 10.2), 0xe9e2d6, 0, 1.1, 0), part(roof.scale(15, 7, 11.5), 0xf4f7fa, 0, 8.3, 0), part(new THREE.BoxGeometry(1.2, 3, 1.2), 0x5a3c26, 4, 11, 2)]);
+    const im = new THREE.InstancedMesh(geo, objMat, m4.length); m4.forEach((m, i) => im.setMatrixAt(i, m)); im.computeBoundingSphere(); hutGroup.add(im);
+  }
+  badgeT = 0; render();
+  return huts.length;
+}
+function hoursDe(s) {
+  if (!s) return '';
+  const D = { Mo: 'Mo', Tu: 'Di', We: 'Mi', Th: 'Do', Fr: 'Fr', Sa: 'Sa', Su: 'So', PH: 'Feiertag' };
+  return s.replace(/\b(Mo|Tu|We|Th|Fr|Sa|Su|PH)\b/g, m => D[m]).replace(/\boff\b/g, 'geschlossen').replace(/;\s*/g, ' · ');
+}
+function showHut(h) {
+  highlight(null); pinGroup.clear(); ui.prof.classList.add('hidden');
+  const web = h.web && /^https?:\/\//.test(h.web) ? `<a href="${h.web.replace(/"/g, '')}" target="_blank" rel="noopener">Webseite</a>` : '';
+  ui.info.innerHTML = `<div class="ph"><span class="badge hut">${HUT_IC[h.type] || '🍴'}</span><div><div class="pt">${h.name || HUT_DE[h.type] || 'Hütte'}</div><div class="ps">${HUT_DE[h.type] || ''} · ${Math.round(h.ele || h.h)} m</div></div></div>
+    ${h.hours ? `<div class="i-row"><span>🕘 ${hoursDe(h.hours)}</span></div>` : '<div class="i-row"><span>Öffnungszeiten nicht eingetragen</span></div>'}
+    ${web ? `<div class="i-row">${web}</div>` : ''}
+    <div class="rt-opts"><button class="tg primary" id="hut-route">Route hierher</button><button class="tg" id="hut-meet">Als Treffpunkt</button></div>
+    <div class="i-src">Daten: OpenStreetMap – Zeiten ohne Gewähr</div>`;
+  ui.info.classList.remove('hidden');
+  $('hut-route').onclick = () => {
+    setRouting(true); setTab('route'); route.b = h.node;
+    if (route.a === null && gps.xz) route.a = meNode();
+    if (route.a !== null) computeRoute(); else { drawRoute(); renderRoutePanel(); $('rt-sum').innerHTML = `<div class="rt-hint">Ziel: <b>${h.name || 'Hütte'}</b>. Tippe jetzt auf der Karte, wo du bist – oder „📍 Start = mein Standort“.</div>`; }
+    updateUi();
+  };
+  $('hut-meet').onclick = () => { setRouting(true); setTab('meet'); meet.node = h.node; meet.fairMsg = ''; meet.target = nextTarget(); computeMeet(); updateUi(); };
+  render();
+}
+
 // mode buttons & legend
 var terrainSlope = false;
 function updateUi() {
@@ -1237,6 +1311,7 @@ $('btn-route').onclick = () => setRouting(!routing);
 $('btn-measure').onclick = () => { if (routing) setRouting(false); measuring = !measuring; closePanels(); if (!measuring) { pts = []; rebuildMeasure(); } updateUi(); };
 $('btn-undo').onclick = () => { pts.pop(); rebuildMeasure(); updateUi(); };
 $('btn-clear').onclick = () => { pts = []; rebuildMeasure(); updateUi(); };
+$('tg-huts').onclick = () => { showHuts = !showHuts; hutGroup.visible = showHuts; $('tg-huts').classList.toggle('on', showHuts); badgeT = 0; render(); };
 $('tg-slope').onclick = () => { terrainSlope = !terrainSlope; mat.map = terrainSlope ? texSlope : texBase; mat.needsUpdate = true; updateUi(); render(); };
 $('btn-reset').onclick = () => { resetView(); render(); };
 $('pr-close').onclick = () => { closePanels(); };
@@ -1285,6 +1360,6 @@ function loop() {
 }
 loop();
 
-window.__app = { nav, gps, startNav, stopNav, focusStep, camera, controls, runs, lifts, showRun, showLift, setMode, G, route, computeRoute, setRouting, buildSteps, meet, computeMeet, setTab, fairMeet, placeName };
+window.__app = { setHuts, huts, showHut, nav, gps, startNav, stopNav, focusStep, camera, controls, runs, lifts, showRun, showLift, setMode, G, route, computeRoute, setRouting, buildSteps, meet, computeMeet, setTab, fairMeet, placeName };
 
 }

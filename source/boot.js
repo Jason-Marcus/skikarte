@@ -153,6 +153,22 @@ async function loadOverpass(bb) {
     lifts.push(['l', e.tags.name || '', e.tags.ref || '', LIFT_MAP[e.tags.aerialway], e.tags['aerialway:capacity'] || '', e.geometry.map(p => [+p.lon.toFixed(6), +p.lat.toFixed(6)])]);
   return { runs, lifts };
 }
+async function loadHuts(bb) {
+  const box = `${bb.s.toFixed(5)},${bb.w.toFixed(5)},${bb.n.toFixed(5)},${bb.e.toFixed(5)}`;
+  const A = '["amenity"~"^(restaurant|cafe|bar|pub|fast_food|biergarten)$"]', T = '["tourism"~"^(alpine_hut|wilderness_hut)$"]';
+  const ql = `[out:json][timeout:60];(node${A}(${box});way${A}(${box});node${T}(${box});way${T}(${box}););out center tags qt;`;
+  for (const [srv, ms] of [['https://overpass-api.de/api/interpreter', 45000], ['https://overpass.private.coffee/api/interpreter', 25000], ['https://maps.mail.ru/osm/tools/overpass/api/interpreter', 25000]]) {
+    try {
+      const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), ms);
+      const r = await fetch(srv, { method: 'POST', body: 'data=' + encodeURIComponent(ql), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctl.signal });
+      const txt = await r.text(); clearTimeout(to); if (!r.ok) continue;
+      const j = JSON.parse(txt);
+      return j.elements.map(e => { const t = e.tags || {}, lat = e.lat ?? e.center?.lat, lon = e.lon ?? e.center?.lon; if (lat == null) return null;
+        return { id: e.type[0] + e.id, lat: +lat.toFixed(6), lon: +lon.toFixed(6), name: t.name || '', type: t.tourism || t.amenity, hours: t.opening_hours || '', web: t.website || t['contact:website'] || '', ele: t.ele ? parseFloat(t.ele) : null }; }).filter(Boolean);
+    } catch (e) { }
+  }
+  throw new Error('huts unavailable');
+}
 const lineKm = ln => { let s = 0; for (let i = 1; i < ln.length; i++) s += Math.hypot((ln[i][0] - ln[i - 1][0]) * 111320 * Math.cos(ln[i][1] * Math.PI / 180), (ln[i][1] - ln[i - 1][1]) * 111320); return s / 1000; };
 
 async function loadFeatures(area) {
@@ -407,6 +423,13 @@ async function start(area) {
     $('src-note').textContent = 'Pistendaten für dieses Gebiet: ' + (data.src || 'OpenSkiMap') + (data.partial ? ' – möglicherweise unvollständig.' : '.') + (rec ? ' Offline gespeichert am ' + new Date(rec.savedAt).toLocaleDateString('de-DE') + '.' : '');
     if (data.partial) toast('Einige Pisten fehlen evtl. – die OpenStreetMap-Server waren überlastet.', 'Später neu laden', () => location.reload());
     else if (!rec) toast('Karte gespeichert – funktioniert jetzt auch ohne Internet.');
+    // huts (non-blocking, saved with the map)
+    if (rec && rec.huts) window.__app.setHuts(rec.huts);
+    else loadHuts({ w: bbox.fw - 0.004, e: bbox.fe + 0.004, s: bbox.fs - 0.003, n: bbox.fn + 0.003 }).then(async huts => {
+      const n = window.__app.setHuts(huts);
+      const r2 = await IDB.get(area.id); if (r2) { r2.huts = huts; IDB.put(r2); }
+      if (n) toast(`${n} Hütten und Restaurants an den Pisten geladen.`);
+    }).catch(() => toast('Hütten konnten gerade nicht geladen werden (OpenStreetMap-Server ausgelastet).', 'Nochmal', () => location.reload()));
     // weather (non-blocking, cached for offline)
     let hl = Infinity, hh = -Infinity;
     for (const r of window.__app.runs) for (const q of r.s) { hl = Math.min(hl, q.h); hh = Math.max(hh, q.h); }
