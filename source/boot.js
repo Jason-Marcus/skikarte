@@ -255,44 +255,79 @@ async function loadDEM(bbox) {
   return { M: { B: bbox, RES, nx, ny, mlat, mlon, Wm, Hm }, H };
 }
 
-// textures (same look as the prototype): base terrain + slope overlay
-function makeTextures(M, H) {
+// ---------------- terrain look: snow, rock, forest ----------------
+// approximate alpine treeline by latitude (visual only)
+const TREELINE = [[0, 3900], [30, 3700], [38, 3300], [42, 2500], [45, 2100], [47, 2000], [50, 1750], [55, 1250], [60, 950], [65, 650], [70, 350], [90, 0]];
+function treelineAt(lat) { lat = Math.abs(lat); for (let i = 1; i < TREELINE.length; i++) if (lat <= TREELINE[i][0]) { const [a, ha] = TREELINE[i - 1], [b, hb] = TREELINE[i]; return ha + (hb - ha) * (lat - a) / (b - a); } return 0; }
+function hash2(x, y) { let h = (x * 374761393 + y * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177 | 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function vnoise(x, y) { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash2(xi, yi), b = hash2(xi + 1, yi), c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1); return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v; }
+// forest density (0..255) on the height grid
+function forestMask(M, H) {
+  const { nx, ny, RES, B } = M, F = new Uint8Array(nx * ny), T = treelineAt((B.n + B.s) / 2);
+  let hmin = Infinity; for (let k = 0; k < H.length; k += 3) hmin = Math.min(hmin, H[k]);
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const k = j * nx + i, h = H[k];
+    const gx = (H[j * nx + Math.min(nx - 1, i + 1)] - H[j * nx + Math.max(0, i - 1)]) / (2 * RES), gy = (H[Math.min(ny - 1, j + 1) * nx + i] - H[Math.max(0, j - 1) * nx + i]) / (2 * RES);
+    const sl = Math.atan(Math.hypot(gx, gy)) * 57.2958;
+    const wx = i * RES, wy = j * RES;
+    const n1 = vnoise(wx / 420, wy / 420), n2 = vnoise(wx / 140 + 31, wy / 140 + 17);
+    const lineJitter = (n1 - 0.5) * 220;
+    let d = Math.max(0, Math.min(1, (T + lineJitter - h) / 180));             // fade out towards the treeline
+    d *= Math.max(0, Math.min(1, (49 - sl) / 7));                               // no trees in cliffs
+    if (sl < 5 && h < hmin + 180) d *= 0.15;                                     // valley floor: fields & villages
+    d *= Math.max(0, Math.min(1, (n1 * 0.75 + n2 * 0.25 - 0.22) * 2.2));        // natural clearings
+    F[k] = Math.round(Math.min(1, d * 1.6) * 255);
+  }
+  return F;
+}
+function makeTextures(M, H, F) {
   const { nx, ny, RES } = M, S = 2, tw = (nx - 1) * S + 1, th = (ny - 1) * S + 1;
-  const h = new Float32Array(tw * th);
+  const h = new Float32Array(tw * th), fo = new Float32Array(tw * th);
   for (let j = 0; j < th; j++) for (let i = 0; i < tw; i++) {
     const fx = i / S, fy = j / S, a = Math.floor(fx), b = Math.floor(fy), u = fx - a, v = fy - b, a1 = Math.min(nx - 1, a + 1), b1 = Math.min(ny - 1, b + 1);
-    h[j * tw + i] = (H[b * nx + a] * (1 - u) + H[b * nx + a1] * u) * (1 - v) + (H[b1 * nx + a] * (1 - u) + H[b1 * nx + a1] * u) * v;
+    const bl = (A) => (A[b * nx + a] * (1 - u) + A[b * nx + a1] * u) * (1 - v) + (A[b1 * nx + a] * (1 - u) + A[b1 * nx + a1] * u) * v;
+    h[j * tw + i] = bl(H); fo[j * tw + i] = bl(F) / 255;
   }
   const px = RES / S, base = new Uint8ClampedArray(tw * th * 4), slope = new Uint8ClampedArray(tw * th * 4);
-  const az = 315 * Math.PI / 180, alt = 40 * Math.PI / 180, lx = Math.cos(alt) * Math.sin(az), ly = Math.cos(alt) * Math.cos(az), lz = Math.sin(alt);
+  const az = 315 * Math.PI / 180, alt = 38 * Math.PI / 180, lx = Math.cos(alt) * Math.sin(az), ly = Math.cos(alt) * Math.cos(az), lz = Math.sin(alt);
   const G = (i, j) => h[Math.max(0, Math.min(th - 1, j)) * tw + Math.max(0, Math.min(tw - 1, i))];
-  const forest = [62, 84, 72], snowC = [236, 241, 247], rockC = [120, 118, 122], valley = [214, 222, 226];
+  const snowSun = [250, 251, 253], snowShade = [140, 162, 194], rockSun = [170, 162, 154], rockShade = [76, 80, 94], forSun = [70, 102, 84], forShade = [30, 48, 48];
   const bands = [[25, [255, 224, 80, 120]], [40, [250, 150, 40, 160]], [60, [225, 60, 45, 175]], [80, [165, 40, 140, 185]], [100, [70, 35, 140, 195]]];
-  // elevation-relative snow line: lowest ~15 % of the terrain counts as valley
-  let hmin = Infinity, hmax = -Infinity; for (let k = 0; k < H.length; k += 5) { hmin = Math.min(hmin, H[k]); hmax = Math.max(hmax, H[k]); }
-  const snowAt = Math.max(hmin + 250, Math.min(1450, hmin + (hmax - hmin) * 0.35));
   for (let j = 0; j < th; j++) for (let i = 0; i < tw; i++) {
     const gx = (G(i + 1, j) - G(i - 1, j)) / (2 * px), gy = (G(i, j + 1) - G(i, j - 1)) / (2 * px);
-    // smoothed gradient for slope overlay (2 px)
     const sgx = (G(i + 2, j) - G(i - 2, j)) / (4 * px), sgy = (G(i, j + 2) - G(i, j - 2)) / (4 * px);
-    const sl = Math.atan(Math.hypot(gx, gy)) * 180 / Math.PI, pct = Math.hypot(sgx, sgy) * 100;
-    const n = Math.sqrt(gx * gx + gy * gy + 1), shade = Math.max(0, Math.min(1, (-gx * lx + gy * ly + lz) / n));
-    const e = h[j * tw + i];
-    const snow = Math.max(0, Math.min(1, (e - snowAt) / 350)), rock = Math.max(0, Math.min(1, (sl - 38) / 10)), flat = Math.max(0, Math.min(1, (12 - sl) / 8));
-    const lit = 0.45 + 0.75 * shade, k = (j * tw + i) * 4;
+    const sl = Math.atan(Math.hypot(gx, gy)) * 57.2958, pct = Math.hypot(sgx, sgy) * 100;
+    const n = Math.sqrt(gx * gx + gy * gy + 1), sh = Math.max(0, Math.min(1, (-gx * lx + gy * ly + lz) / n));
+    const s = Math.pow(sh, 0.85), k = (j * tw + i) * 4;
+    const rock = Math.max(0, Math.min(1, (sl - 37) / 10)) * (0.75 + 0.25 * hash2(i, j));
+    const f = fo[j * tw + i] * 0.92;
+    const rockF = rock * (1 - f);
+    const grain = (hash2(i * 3, j * 7) - 0.5) * 6;
     for (let c = 0; c < 3; c++) {
-      let v = forest[c] * (1 - snow) + snowC[c] * snow;
-      v = v * (1 - flat * (1 - snow)) + valley[c] * flat * (1 - snow);
-      v = v * (1 - rock) + rockC[c] * rock;
-      base[k + c] = v * lit; slope[k + c] = v * lit;
+      let v = snowShade[c] + (snowSun[c] - snowShade[c]) * s;
+      v = v * (1 - rockF) + (rockShade[c] + (rockSun[c] - rockShade[c]) * s) * rockF;
+      v = v * (1 - f) + (forShade[c] + (forSun[c] - forShade[c]) * s) * f;
+      base[k + c] = v + grain; slope[k + c] = v + grain;
     }
     base[k + 3] = slope[k + 3] = 255;
     let band = null; for (const [lo, col] of bands) if (pct >= lo) band = col;
-    if (band) { const a = band[3] / 255; for (let c = 0; c < 3; c++) slope[k + c] = slope[k + c] * (1 - a) + band[c] * a; }
+    if (band) { const al = band[3] / 255; for (let c = 0; c < 3; c++) slope[k + c] = slope[k + c] * (1 - al) + band[c] * al; }
   }
-  const toURL = arr => { const c = document.createElement('canvas'); c.width = tw; c.height = th; c.getContext('2d').putImageData(new ImageData(arr, tw, th), 0, 0); return c.toDataURL('image/jpeg', 0.86); };
-  return { base: toURL(base), slope: toURL(slope) };
+  const toBlob = arr => new Promise(res => { const c = document.createElement('canvas'); c.width = tw; c.height = th; c.getContext('2d').putImageData(new ImageData(arr, tw, th), 0, 0); c.toBlob(res, 'image/jpeg', 0.86); });
+  return Promise.all([toBlob(base), toBlob(slope)]).then(([b1, b2]) => ({ base: b1, slope: b2 }));
 }
+
+// ---------------- offline store (IndexedDB) ----------------
+const IDB = {
+  db: null,
+  open() { if (this.db) return Promise.resolve(this.db); return new Promise((res, rej) => { const r = indexedDB.open('skikarte', 1); r.onupgradeneeded = () => r.result.createObjectStore('areas', { keyPath: 'id' }); r.onsuccess = () => res(this.db = r.result); r.onerror = () => rej(r.error); }); },
+  async tx(mode, fn) { const db = await this.open(); return new Promise((res, rej) => { const t = db.transaction('areas', mode), st = t.objectStore('areas'); const r = fn(st); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); }); },
+  get(id) { return this.tx('readonly', st => st.get(id)).catch(() => null); },
+  put(rec) { return this.tx('readwrite', st => st.put(rec)).catch(e => console.warn('save failed', e)); },
+  del(id) { return this.tx('readwrite', st => st.delete(id)).catch(() => null); },
+  async list() { try { const db = await this.open(); return await new Promise(res => { const out = []; const c = db.transaction('areas').objectStore('areas').openCursor(); c.onsuccess = () => { const cur = c.result; if (cur) { const v = cur.value; out.push({ id: v.id, area: v.area, savedAt: v.savedAt, size: v.size, src: v.data?.src }); cur.continue(); } else res(out); }; c.onerror = () => res(out); }); } catch { return []; } },
+};
 
 // ---------------- weather ----------------
 const WMO = { 0: ['☀️', 'Sonnig'], 1: ['🌤️', 'Überwiegend sonnig'], 2: ['⛅', 'Teils bewölkt'], 3: ['☁️', 'Bewölkt'], 45: ['🌫️', 'Nebel'], 48: ['🌫️', 'Nebel mit Reif'],
@@ -340,30 +375,44 @@ async function start(area) {
   document.title = area.name + ' · 3D Skikarte';
   try {
     progress('Verbinde …', 0.02);
-    const data = await loadFeatures(area);
-    if (!data.runs.length) throw new Error('Für dieses Skigebiet sind in OpenStreetMap keine Alpinpisten eingetragen.');
-    // bbox of features + margin
-    let w = 180, e = -180, s = 90, n = -90;
-    for (const f of [...data.runs, ...data.lifts]) for (const [lo, la] of f[5]) { w = Math.min(w, lo); e = Math.max(e, lo); s = Math.min(s, la); n = Math.max(n, la); }
-    const mLat = 900 / 111320, mLon = 900 / (111320 * Math.cos((s + n) / 2 * Math.PI / 180));
-    const bbox = { w: w - mLon, e: e + mLon, s: s - mLat, n: n + mLat };
-    const { M, H } = await loadDEM(bbox);
-    progress('Berechne Gelände und Steilheit …', 0.93);
-    await new Promise(r => setTimeout(r, 30));
-    const tex = makeTextures(M, H);
-    $('img-base').src = tex.base; $('img-slope').src = tex.slope;
+    let rec = await IDB.get(area.id), data, M, H, F, tex, bbox;
+    if (rec && rec.v === 7) {
+      progress('Gespeicherte Karte öffnen …', 0.6);
+      ({ data, M, H, F, tex, bbox } = rec);
+    } else {
+      data = await loadFeatures(area);
+      if (!data.runs.length) throw new Error('Für dieses Skigebiet sind in OpenStreetMap keine Alpinpisten eingetragen.');
+      let w = 180, e = -180, s = 90, n = -90;
+      for (const f of [...data.runs, ...data.lifts]) for (const [lo, la] of f[5]) { w = Math.min(w, lo); e = Math.max(e, lo); s = Math.min(s, la); n = Math.max(n, la); }
+      const mLat = 900 / 111320, mLon = 900 / (111320 * Math.cos((s + n) / 2 * Math.PI / 180));
+      bbox = { w: w - mLon, e: e + mLon, s: s - mLat, n: n + mLat, fw: w, fe: e, fs: s, fn: n };
+      ({ M, H } = await loadDEM(bbox));
+      progress('Berechne Gelände, Wald und Steilheit …', 0.93);
+      await new Promise(r => setTimeout(r, 30));
+      F = forestMask(M, H);
+      tex = await makeTextures(M, H, F);
+      if (!data.partial) {
+        const size = H.byteLength + F.byteLength + tex.base.size + tex.slope.size + JSON.stringify(data).length;
+        IDB.put({ id: area.id, v: 7, area, data, M, H, F, tex, bbox, savedAt: Date.now(), size });
+        try { navigator.storage?.persist?.(); } catch { }
+      }
+    }
+    $('img-base').src = URL.createObjectURL(tex.base); $('img-slope').src = URL.createObjectURL(tex.slope);
     await Promise.all(['img-base', 'img-slope'].map(id => $(id).decode().catch(() => { })));
-    window.__META = M; window.__HGT = H; window.__FEATS = [...data.runs, ...data.lifts];
-    window.__VIEW = { lon: (w + e) / 2, lat: (s + n) / 2, size: Math.max((e - w) * M.mlon, (n - s) * M.mlat) };
+    window.__META = M; window.__HGT = H; window.__FOREST = F; window.__FEATS = [...data.runs, ...data.lifts];
+    window.__VIEW = { lon: (bbox.fw + bbox.fe) / 2, lat: (bbox.fs + bbox.fn) / 2, size: Math.max((bbox.fe - bbox.fw) * M.mlon, (bbox.fn - bbox.fs) * M.mlat) };
     progress('Fertig', 1);
     runApp();
     $('loading').classList.add('hidden');
-    $('src-note').textContent = 'Pistendaten für dieses Gebiet: ' + (data.src || 'OpenSkiMap') + (data.partial ? ' – möglicherweise unvollständig.' : '.');
-    if (data.partial) { const t = $('toast'); t.innerHTML = 'Einige Pisten fehlen evtl. – die OpenStreetMap-Server waren überlastet. <button id="toast-retry">Später neu laden</button>'; t.classList.remove('hidden'); $('toast-retry').onclick = () => location.reload(); setTimeout(() => t.classList.add('hidden'), 12000); }
-    // weather (non-blocking)
+    $('src-note').textContent = 'Pistendaten für dieses Gebiet: ' + (data.src || 'OpenSkiMap') + (data.partial ? ' – möglicherweise unvollständig.' : '.') + (rec ? ' Offline gespeichert am ' + new Date(rec.savedAt).toLocaleDateString('de-DE') + '.' : '');
+    if (data.partial) toast('Einige Pisten fehlen evtl. – die OpenStreetMap-Server waren überlastet.', 'Später neu laden', () => location.reload());
+    else if (!rec) toast('Karte gespeichert – funktioniert jetzt auch ohne Internet.');
+    // weather (non-blocking, cached for offline)
     let hl = Infinity, hh = -Infinity;
     for (const r of window.__app.runs) for (const q of r.s) { hl = Math.min(hl, q.h); hh = Math.max(hh, q.h); }
-    loadWeather((s + n) / 2, (w + e) / 2, hl, hh).then(renderWeather).catch(() => { $('wx-chip').classList.add('hidden'); });
+    const cLat = (bbox.fs + bbox.fn) / 2, cLon = (bbox.fw + bbox.fe) / 2;
+    loadWeather(cLat, cLon, hl, hh).then(w => { LS.set('wx:' + area.id, { w, t: Date.now() }); renderWeather(w); })
+      .catch(() => { const c = LS.get('wx:' + area.id); if (c && Date.now() - c.t < 36 * 3600e3) { renderWeather(c.w); $('wx-body').insertAdjacentHTML('afterbegin', `<div class="wx-old">Offline – Stand ${new Date(c.t).toLocaleString('de-DE', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</div>`); } else $('wx-chip').classList.add('hidden'); });
   } catch (err) {
     console.error(err);
     $('ld-text').textContent = err && err.message === 'BUSY' ? 'Die OpenStreetMap-Server sind gerade überlastet. Bitte in ein paar Minuten erneut versuchen.'
@@ -371,8 +420,29 @@ async function start(area) {
     $('ld-bar').style.width = '0%'; $('ld-back').classList.remove('hidden'); $('ld-retry').classList.remove('hidden');
   }
 }
+function toast(text, btn, fn) {
+  const t = $('toast'); t.innerHTML = text + (btn ? ` <button id="toast-btn">${btn}</button>` : '');
+  t.classList.remove('hidden'); if (btn) $('toast-btn').onclick = fn;
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.add('hidden'), btn ? 12000 : 4500);
+}
+window.__toast = toast;
+async function renderSaved() {
+  const list = await IDB.list(), box = $('saved');
+  if (!list.length) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  list.sort((a, b) => b.savedAt - a.savedAt);
+  $('saved-list').innerHTML = '';
+  for (const it of list) {
+    const li = document.createElement('li');
+    li.innerHTML = `<div><b>${it.area.name}</b><small>${it.area.place || ''} · ${(it.size / 1048576).toFixed(1).replace('.', ',')} MB · ${new Date(it.savedAt).toLocaleDateString('de-DE')}</small></div><button class="sv-del" aria-label="Löschen">🗑</button>`;
+    li.onclick = ev => { if (ev.target.closest('.sv-del')) return; chooseArea(it.area); };
+    li.querySelector('.sv-del').onclick = async () => { if (li.classList.contains('confirm')) { await IDB.del(it.id); LS.del('sa:' + it.id); renderSaved(); } else { li.classList.add('confirm'); li.querySelector('.sv-del').textContent = 'Löschen?'; } };
+    $('saved-list').appendChild(li);
+  }
+}
 function showStart() {
   $('start').classList.remove('hidden'); $('loading').classList.add('hidden');
+  renderSaved();
   const inp = $('sr-input'); let t; inp.oninput = () => { clearTimeout(t); t = setTimeout(() => doSearch(inp.value), 300); };
   document.querySelectorAll('.sr-chip').forEach(b => b.onclick = () => { inp.value = b.textContent; doSearch(b.textContent); });
   setTimeout(() => inp.focus(), 50);
@@ -381,5 +451,6 @@ $('btn-switch').onclick = $('ld-back').onclick = () => { LS.del('skiarea'); loca
 $('ld-retry').onclick = () => location.reload();
 $('wx-chip').onclick = () => $('wx').classList.remove('hidden');
 $('wx-close').onclick = () => $('wx').classList.add('hidden');
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => { });
 const area = LS.get('skiarea');
 if (area && area.id) start(area); else showStart();
