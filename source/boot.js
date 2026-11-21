@@ -157,7 +157,7 @@ const lineKm = ln => { let s = 0; for (let i = 1; i < ln.length; i++) s += Math.
 
 async function loadFeatures(area) {
   const cached = LS.get('sa:' + area.id);
-  if (cached && cached.v === 5) return cached;
+  if (cached && cached.v === 6 && cached.runs?.length && !cached.partial) return cached;
   // 1) bounding box from the viewport hint
   const c = area.vh?.center || area.center;
   const R = area.vh ? Math.max(3000, Math.hypot(area.vh.rotatedWidthMeters, area.vh.rotatedHeightMeters) / 2 * 1.25) : 8000;
@@ -211,7 +211,7 @@ async function loadFeatures(area) {
     const p = f.properties;
     return ['l', p.name || '', p.ref || '', p.liftType || '', p.capacity || '', f.geometry.coordinates.map(q => [+q[0].toFixed(6), +q[1].toFixed(6)])];
   }, (d, n) => progress(`Lifte laden … ${d}/${n}`, 0.35 + d / n * 0.25))).filter(Boolean);
-  let data = { v: 5, runs, lifts, src: 'OpenSkiMap' };
+  let data = { v: 6, runs, lifts, src: 'OpenSkiMap' };
   // completeness check against the official OpenSkiMap statistics
   const tileKm = runs.reduce((a, r) => a + lineKm(r[5]), 0);
   if (!runs.length || (area.km && tileKm < area.km * 0.8)) {
@@ -219,7 +219,7 @@ async function loadFeatures(area) {
       const bb = { w: c[0] - dLon, e: c[0] + dLon, s: c[1] - dLat, n: c[1] + dLat };
       const ov = await loadOverpass(bb);
       const ovKm = ov.runs.reduce((a, r) => a + lineKm(r[5]), 0);
-      if (ovKm > tileKm) data = { v: 5, runs: ov.runs, lifts: ov.lifts, src: 'OpenStreetMap (Overpass)' };
+      if (ovKm > tileKm) data = { v: 6, runs: ov.runs, lifts: ov.lifts, src: 'OpenStreetMap (Overpass)' };
     } catch (e) { console.warn('Overpass fallback failed', e); data.partial = true; }
   }
   if (data.partial && !data.runs.length) throw new Error('BUSY');
