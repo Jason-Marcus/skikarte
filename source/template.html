@@ -65,7 +65,9 @@
   #navbar, #navpanel { display:none; }
   body.navi #navbar { display:flex; position:fixed; left:10px; right:10px; top:max(10px, env(safe-area-inset-top)); padding:12px 14px; border-radius:16px; gap:12px; align-items:center; background:rgba(11,26,42,.9); color:#fff; z-index:8; }
   #nv-icon { font-size:34px; width:44px; text-align:center; } #nv-main { font-size:18px; font-weight:750; letter-spacing:-.01em; } #nv-sub { font-size:14px; opacity:.8; margin-top:2px; }
-  body.navi #navpanel { display:flex; position:fixed; left:10px; right:10px; bottom:max(12px, env(safe-area-inset-bottom)); padding:12px 14px; border-radius:16px; align-items:center; justify-content:space-between; gap:10px; z-index:8; }
+  body.navi #navpanel { display:block; position:fixed; left:10px; right:10px; bottom:max(12px, env(safe-area-inset-bottom)); padding:12px 14px; border-radius:16px; z-index:8; }
+  .nv-top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  #nv-tools { display:flex; gap:6px; margin-top:10px; } #nv-tools button { border:1px solid var(--line); background:#fff; font:inherit; font-size:13px; font-weight:650; padding:8px 10px; border-radius:10px; cursor:pointer; } #nv-tools #nv-off { flex:1; } #nv-tools.hidden { display:none !important; }
   #nv-rem { font-weight:700; font-size:15px; } #nv-sim { font-size:11.5px; color:var(--mut); }
   #nv-stop { border:0; background:#d7262b; color:#fff; font:inherit; font-weight:700; padding:10px 16px; border-radius:12px; cursor:pointer; }
   body.navi header, body.navi nav, body.navi #legend, body.navi #hint, body.navi #btn-loc, body.navi #info, body.navi #profile, body.navi #labels .lbl:not(.rt) { display:none !important; }
@@ -249,7 +251,7 @@
   <div id="rt-route-body" class="rt-body">
     <div id="rt-seg" class="seg"><button data-r="1">Nur blau</button><button data-r="2">Bis rot</button><button data-r="3">Auch schwarz</button></div>
     <div id="rt-sum"></div>
-    <div id="rt-navrow" class="rt-opts hidden"><button id="rt-nav" class="tg primary">▶ Navigation starten</button><button id="rt-sim" class="tg">Vorschau</button></div>
+    <div id="rt-navrow" class="rt-opts hidden"><button id="rt-nav" class="tg primary">▶ Navigation starten</button><button id="rt-sim" class="tg">Testfahrt</button></div>
     <ol id="rt-steps"></ol>
     <div class="rt-opts"><button id="rt-me" class="tg">📍 Start = mein Standort</button><button id="rt-swap" class="tg">Start ⇄ Ziel</button></div>
   </div>
@@ -263,7 +265,7 @@
 </div>
 <button id="btn-loc" class="glass" data-state="off" title="Mein Standort"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3.2" fill="currentColor"/><circle cx="12" cy="12" r="7.5"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></svg></button>
 <div id="navbar" class="glass"><div id="nv-icon">↑</div><div class="nv-txt"><div id="nv-main"></div><div id="nv-sub"></div></div></div>
-<div id="navpanel" class="glass"><div><div id="nv-rem"></div><div id="nv-sim" class="hidden">Vorschau · 4× Geschwindigkeit</div></div><button id="nv-stop">Beenden</button></div>
+<div id="navpanel" class="glass"><div class="nv-top"><div><div id="nv-rem"></div><div id="nv-sim" class="hidden">Testfahrt · simuliertes GPS</div></div><button id="nv-stop">Beenden</button></div><div id="nv-tools" class="hidden"><button id="nv-speed" title="Geschwindigkeit">4×</button><button id="nv-pause" title="Pause">⏸</button><button id="nv-off">Von der Route abfahren</button></div></div>
 <div id="hint"></div>
 <div id="toast" class="glass hidden"></div>
 

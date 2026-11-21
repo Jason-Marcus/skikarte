@@ -9,7 +9,7 @@ Jedes Skigebiet in 3D – mit echter Steilheit, Routenplaner, Treffpunkt für Fr
 - Pisten nach Schwierigkeit oder nach berechnetem Gefälle einfärben, Pistennummern auf der Karte, Pistenprofil mit steilster Stelle
 - Lifte als 3D-Modelle je Typ (Gondel, Sessel, Pendelbahn, Schlepplift) mit Stützen, Stationen und fahrenden Kabinen
 - Routenplaner: Start und Ziel antippen oder eigenen Standort nehmen, Schwierigkeit wählen (nur blau / bis rot / auch schwarz), Schritte antippen zum Hinfliegen
-- Navigation mit GPS: mitfahrende 3D-Ansicht mit Abbiege-Hinweisen, Neuberechnung bei Abweichung, Vorschau-Modus zum Ausprobieren zu Hause
+- Navigation mit GPS: mitfahrende 3D-Ansicht mit Abbiege-Hinweisen, Neuberechnung bei Abweichung, Testfahrt mit simuliertem GPS zum Ausprobieren zu Hause
 - Treffpunkt: bis zu 4 Personen, eigene Route für jeden, „fairen Treffpunkt“ finden
 - Offline: geladene Skigebiete werden gespeichert und funktionieren ohne Internet („Meine Skigebiete“)
 - Wetter für Tal und Berg mit 3-Tage-Vorschau

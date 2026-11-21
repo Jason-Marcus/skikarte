@@ -236,11 +236,15 @@ for (const l of lifts) {
   }
   l.path = path; l.len = d;
   l.h0 = heightAt(nodes[0].x, nodes[0].z); l.h1 = heightAt(nodes[nodes.length - 1].x, nodes[nodes.length - 1].z);
-  if (!carpet) for (let i = 0; i < path.length - 1; i++) cablePos.push(path[i].x, path[i].y, path[i].z, path[i + 1].x, path[i + 1].y, path[i + 1].z);
+  l.gauge = aerial ? (l.cls === 'cable_car' ? 5.5 : l.cls === 'chair_lift' ? 3.2 : 3.6) : 0;
+  if (!carpet) for (const side of (aerial ? [-1, 1] : [0])) for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i], b = path[i + 1], L = Math.hypot(b.x - a.x, b.z - a.z) || 1, ox = (b.z - a.z) / L * l.gauge * side, oz = -(b.x - a.x) / L * l.gauge * side;
+    cablePos.push(a.x + ox, a.y, a.z + oz, b.x + ox, b.y, b.z + oz);
+  }
   // pylons
   for (let k = 1; k < nodes.length - 1; k++) {
     const nd = nodes[k], a = nodes[k - 1], b = nodes[k + 1], ang = Math.atan2(b.x - a.x, b.z - a.z), hgt = nd.y - nd.g;
-    _q.setFromAxisAngle(_up, ang); _m.compose(_v.set(nd.x, nd.g, nd.z), _q, _s.set(aerial ? 1 : 0.6, hgt, aerial ? 1 : 0.6)); pylonM4.push(_m.clone());
+    _q.setFromAxisAngle(_up, ang); _m.compose(_v.set(nd.x, nd.g, nd.z), _q, _s.set(aerial ? l.gauge / 3.6 : 0.6, hgt, aerial ? 1 : 0.6)); pylonM4.push(_m.clone());
   }
   // stations
   const A = nodes[0], B = nodes[1], Z = nodes[nodes.length - 1], Y = nodes[nodes.length - 2];
@@ -258,7 +262,7 @@ function part(g, color, tx = 0, ty = 0, tz = 0) { g.translate(tx, ty, tz); const
 const objMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 function instanced(geo, list) { if (!list.length) return null; const im = new THREE.InstancedMesh(geo, objMat, list.length); list.forEach((m, i) => im.setMatrixAt(i, m)); im.computeBoundingSphere(); liftGroup.add(im); return im; }
 // pylon: lattice-like mast (scaled to height) + cross arm
-const pylonGeo = mergeGeometries([part(new THREE.BoxGeometry(1.6, 1, 1.6), 0x8b96a3, 0, 0.5, 0), part(new THREE.BoxGeometry(0.4, 0.06, 9), 0x6d7884, 0, 0.98, 0)]);
+const pylonGeo = mergeGeometries([part(new THREE.BoxGeometry(1.6, 1, 1.6), 0x8b96a3, 0, 0.5, 0), part(new THREE.BoxGeometry(9, 0.05, 0.6), 0x6d7884, 0, 0.985, 0), part(new THREE.BoxGeometry(0.5, 0.06, 0.5), 0x4a525c, -3.8, 0.96, 0), part(new THREE.BoxGeometry(0.5, 0.06, 0.5), 0x4a525c, 3.8, 0.96, 0)]);
 instanced(pylonGeo, pylonM4);
 // station: building with gabled roof (unit size, scaled per type)
 const roof = new THREE.CylinderGeometry(0.62, 0.62, 1.04, 3, 1); roof.rotateZ(Math.PI / 2); roof.rotateY(Math.PI / 2); roof.scale(1, 0.55, 1);
@@ -303,7 +307,7 @@ function updateCabins(t, camDist) {
     if (s.shuttle !== undefined) { const T = l.len / c.sp, ph = ((t * TIME_X / T) + s.shuttle) % 2; const f = ph < 1 ? ph : 2 - ph; d = (s.shuttle ? 1 - f : f) * l.len; side = s.shuttle ? 1 : -1; }
     else { const f = ((s.off + t * TIME_X * c.sp / l.len) % 1); d = s.dir ? (1 - f) * l.len : f * l.len; side = s.dir ? 1 : -1; }
     const [x, y, z, dx, dz] = pathAt(l, d);
-    const ang = Math.atan2(dx, dz), off = s.key === 'drag' ? 0 : side * (2.5 + k * 1.2);
+    const ang = Math.atan2(dx, dz), off = s.key === 'drag' ? 0 : side * l.gauge;
     _v.set(x + Math.cos(ang) * off, y, z - Math.sin(ang) * off);
     _q.setFromAxisAngle(_up, ang + (s.dir ? Math.PI : 0)); _s.set(k, k, k);
     _m.compose(_v, _q, _s); cm.im.setMatrixAt(cm.n++, _m);
@@ -954,15 +958,48 @@ const badgeGroup = new THREE.Group(); scene.add(badgeGroup);
       const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; texCache.set(key, { t, a: c.width / c.height });
     }
     const { t, a } = texCache.get(key), q = r.s[Math.floor(r.s.length / 2)];
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, sizeAttenuation: false, depthWrite: false, transparent: true }));
-    sp.position.set(q.x, meshHeight(q.x, q.z) + 25, q.z); sp.scale.set(0.034 * a, 0.034, 1); sp.renderOrder = 10; sp.userData.run = r;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, sizeAttenuation: false, depthWrite: false, depthTest: false, transparent: true }));
+    sp.position.set(q.x, meshHeight(q.x, q.z) + 18, q.z); sp.scale.set(0.034 * a, 0.034, 1); sp.renderOrder = 10;
+    sp.userData = { run: r, a, prio: (r.ref ? 2e6 : 0) + r.len };
     badgeGroup.add(sp);
   }
 }
+var badgeT = 0, badgeCam = new THREE.Vector3(), badgeTgt = new THREE.Vector3();
+const _bp = new THREE.Vector3();
+function occluded(p) { // is the terrain between camera and point p?
+  const c = camera.position;
+  for (let i = 1; i < 24; i++) { const t = i / 24, x = c.x + (p.x - c.x) * t, y = c.y + (p.y - c.y) * t, z = c.z + (p.z - c.z) * t; if (inside(x, z) && y < meshHeight(x, z) - 3) return true; }
+  return false;
+}
 function updateBadges(dist) {
-  const show = !nav.active && dist < 7000; badgeGroup.visible = show; if (!show) return;
-  const lim = Math.max(2500, dist * 1.6);
-  for (const sp of badgeGroup.children) sp.visible = camera.position.distanceTo(sp.position) < lim;
+  const show = !nav.active && dist < 9000; badgeGroup.visible = show; if (!show) return;
+  const now = performance.now();
+  if (now - badgeT < 160 && badgeCam.distanceTo(camera.position) < 1 && badgeTgt.distanceTo(controls.target) < 1) return;
+  badgeT = now; badgeCam.copy(camera.position); badgeTgt.copy(controls.target);
+  const W2 = window.innerWidth, H2 = window.innerHeight, unit = H2 / (2 * Math.tan(camera.fov * Math.PI / 360));
+  const lim = Math.max(2500, dist * 1.7), cand = [];
+  for (const sp of badgeGroup.children) {
+    sp.visible = false;
+    const d = camera.position.distanceTo(sp.position); if (d > lim) continue;
+    _bp.copy(sp.position).project(camera); if (_bp.z > 1 || Math.abs(_bp.x) > 1.1 || Math.abs(_bp.y) > 1.1) continue;
+    const k = THREE.MathUtils.clamp(2600 / d, 0.62, 1.12), hgt = 0.034 * k;      // smaller when far away
+    sp.scale.set(hgt * sp.userData.a, hgt, 1);
+    const hp = hgt * unit, wp = hp * sp.userData.a, cx = (_bp.x + 1) / 2 * W2, cy = (1 - _bp.y) / 2 * H2;
+    cand.push({ sp, d, r: [cx - wp / 2 - 3, cy - hp / 2 - 3, cx + wp / 2 + 3, cy + hp / 2 + 3], prio: sp.userData.prio - d * 50 });
+  }
+  cand.sort((x, y) => y.prio - x.prio);
+  const taken = [];
+  for (const l of labels) { // lift name tags (HTML) win over piste numbers
+    if (!l.el.classList.contains('lift') || l.el.style.display === 'none' || !l.el.offsetWidth) continue;
+    _bp.copy(l.v).project(camera); if (_bp.z > 1) continue;
+    const cx = (_bp.x + 1) / 2 * W2, cy = (1 - _bp.y) / 2 * H2, w = l.el.offsetWidth, h = l.el.offsetHeight;
+    taken.push([cx - w / 2 - 2, cy - h - 6, cx + w / 2 + 2, cy + 2]);
+  }
+  for (const c of cand) {
+    if (taken.some(t => c.r[0] < t[2] && c.r[2] > t[0] && c.r[1] < t[3] && c.r[3] > t[1])) continue;   // overlaps a more important label
+    if (occluded(c.sp.position)) continue;                                                              // hidden behind a ridge
+    c.sp.visible = true; taken.push(c.r);
+  }
 }
 
 // ---------- LEGEND + PANEL COLLAPSING ----------
@@ -1092,18 +1129,20 @@ function renderNav() {
   $('nv-icon').textContent = icon; $('nv-main').textContent = main; $('nv-sub').textContent = sub;
   $('nv-rem').textContent = nav.done ? 'Angekommen' : `noch ca. ${fmtMin(remT)} · ${fmtLen(left)}`;
 }
-async function startNav(sim) {
+async function startNav(isSim) {
   if (!route.res) return;
-  prepareNav(route.res); nav.active = true; nav.sim = sim; nav.simT = 0;
+  prepareNav(route.res); nav.active = true; nav.sim = isSim;
+  if (isSim) { sim.d = 0; sim.lat = 0; sim.latT = 0; sim.fixT = 0; sim.paused = false; sim.pos = null; simUi(); }
   document.body.classList.add('navi'); $('route').classList.add('hidden');
   routeGroup.children.forEach(o => { if (o.geometry === markerGeo) o.visible = false; }); startLbl.el.style.visibility = 'hidden';
   controls.enabled = false; tween = null;
   const p = posAt(0); nav.camTgt.set(p.x, p.y, p.z); nav.camPos.copy(camera.position);
-  if (!sim) { startGps(true); try { nav.wake = await navigator.wakeLock?.request('screen'); } catch { } }
-  $('nv-sim').classList.toggle('hidden', !sim);
+  if (!isSim) { startGps(true); try { nav.wake = await navigator.wakeLock?.request('screen'); } catch { } }
+  $('nv-sim').classList.toggle('hidden', !isSim); $('nv-tools').classList.toggle('hidden', !isSim);
   renderNav(); render();
 }
 function stopNav() {
+  if (nav.sim) { gps.xz = null; meGroup.visible = false; }
   nav.active = false; document.body.classList.remove('navi'); controls.enabled = true;
   routeGroup.children.forEach(o => { o.visible = true; }); if (route.a !== null) startLbl.el.style.visibility = '';
   try { nav.wake?.release(); } catch { } nav.wake = null;
@@ -1119,32 +1158,51 @@ function navOnGps(x, z) {
   if (best && bd < 70) { nav.prog = Math.max(nav.prog, best.d); nav.off = 0; }
   else if (++nav.off >= 3) { // off route: recalc from here
     const a = snap(x, z, 300);
-    if (a !== null && route.b !== null) { const r2 = dijkstra(a, route.b, route.rank, route.allowDown); if (r2) { route.a = a; route.res = r2; drawRoute(); prepareNav(r2); window.__toast && window.__toast('Neue Route berechnet.'); } }
+    if (a !== null && route.b !== null) { const r2 = dijkstra(a, route.b, route.rank, route.allowDown); if (r2) { route.a = a; route.res = r2; drawRoute(); routeGroup.children.forEach(o => { if (o.geometry === markerGeo) o.visible = false; }); startLbl.el.style.visibility = 'hidden'; prepareNav(r2); if (nav.sim) { sim.d = 0; sim.lat = 0; sim.latT = 0; } window.__toast && window.__toast('Neue Route berechnet.'); } }
     nav.off = 0;
   }
-  if (nav.total - nav.prog < 35) nav.done = true;
+  if (nav.total - nav.prog < 35 || (nav.sim && nav.total - sim.d < 5)) nav.done = true;
   renderNav();
 }
 var navLastT = 0;
+// test drive: a virtual skier follows the instructions, the app only sees noisy GPS fixes (same logic as outdoors)
+const sim = { d: 0, mult: 4, paused: false, lat: 0, latT: 0, fixT: 0, pos: null };
+function simTruth() { // true position of the virtual skier
+  const p = posAt(sim.d), hd = dirAt(sim.d, 30) * Math.PI / 180;
+  return { x: p.x + Math.cos(hd) * sim.lat, z: p.z + Math.sin(hd) * sim.lat };
+}
 function navUpdate(t) {
   const dt = Math.min(0.1, t - navLastT || 0.016); navLastT = t;
-  if (nav.sim && !nav.done) { // preview: ride the route at 4× speed
-    const st = nav.steps[stepAtProg(nav.prog)];
+  if (nav.sim && !nav.done && !sim.paused) {
+    const st = nav.steps[stepAtProg(sim.d)];
     const v = st.kind === 'lift' ? (LIFT_SPEED[lifts[st.id].cls] || 3) : st.kind === 'walk' ? WALK_V * 2 : SKI_V;
-    nav.prog = Math.min(nav.total, nav.prog + v * 4 * dt);
-    if (nav.total - nav.prog < 2) nav.done = true;
-    if (((t * 4) | 0) !== nav.lastR) { nav.lastR = (t * 4) | 0; renderNav(); }
+    sim.d = Math.min(nav.total, sim.d + v * sim.mult * dt);
+    if (sim.latT > 0) { sim.latT -= dt * sim.mult; sim.lat = Math.min(160, sim.lat + 25 * sim.mult * dt); }   // drifting off the route
+    sim.pos = simTruth();
+    sim.fixT -= dt;
+    if (sim.fixT <= 0) { // one GPS fix per second (scaled), ±6 m noise
+      sim.fixT = 1 / Math.max(1, sim.mult / 2);
+      const nx = sim.pos.x + (Math.random() - 0.5) * 12, nz = sim.pos.z + (Math.random() - 0.5) * 12;
+      gps.xz = [nx, nz]; gps.me = { acc: 8 }; navOnGps(nx, nz);
+    }
   }
   const P = posAt(nav.prog), hd = dirAt(nav.prog + 30, 60) * Math.PI / 180;
   const fx = Math.sin(hd), fz = -Math.cos(hd);
-  const pos = nav.sim || !gps.xz ? P : { x: gps.xz[0], z: gps.xz[1], y: meshHeight(gps.xz[0], gps.xz[1]) };
-  placeMe(pos.x, pos.z, nav.sim ? 6 : gps.me?.acc);
+  const pos = nav.sim && sim.pos ? { x: sim.pos.x, z: sim.pos.z, y: meshHeight(sim.pos.x, sim.pos.z) } : !gps.xz ? P : { x: gps.xz[0], z: gps.xz[1], y: meshHeight(gps.xz[0], gps.xz[1]) };
+  placeMe(pos.x, pos.z, nav.sim ? 8 : gps.me?.acc);
   const want = new THREE.Vector3(pos.x - fx * 260, Math.max(pos.y, meshHeight(pos.x - fx * 260, pos.z - fz * 260)) + 150, pos.z - fz * 260);
   const tgt = new THREE.Vector3(pos.x + fx * 140, pos.y + 10, pos.z + fz * 140);
   const a = 1 - Math.pow(0.02, dt);
   nav.camPos.lerp(want, a); nav.camTgt.lerp(tgt, a);
   camera.position.copy(nav.camPos); camera.lookAt(nav.camTgt);
 }
+function simUi() {
+  $('nv-speed').textContent = sim.mult + '×';
+  $('nv-pause').textContent = sim.paused ? '▶' : '⏸';
+}
+$('nv-speed').onclick = () => { sim.mult = sim.mult === 1 ? 4 : sim.mult === 4 ? 10 : 1; simUi(); };
+$('nv-pause').onclick = () => { sim.paused = !sim.paused; simUi(); };
+$('nv-off').onclick = () => { sim.latT = 6; window.__toast && window.__toast('Test: Du fährst jetzt von der Route ab …'); };
 $('rt-nav').onclick = () => startNav(false);
 $('rt-sim').onclick = () => startNav(true);
 $('rt-me').onclick = () => {
