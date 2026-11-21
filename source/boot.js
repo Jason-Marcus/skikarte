@@ -157,7 +157,7 @@ async function loadHuts(bb) {
   const box = `${bb.s.toFixed(5)},${bb.w.toFixed(5)},${bb.n.toFixed(5)},${bb.e.toFixed(5)}`;
   const A = '["amenity"~"^(restaurant|cafe|bar|pub|fast_food|biergarten)$"]', T = '["tourism"~"^(alpine_hut|wilderness_hut)$"]';
   const ql = `[out:json][timeout:60];(node${A}(${box});way${A}(${box});node${T}(${box});way${T}(${box}););out center tags qt;`;
-  for (const [srv, ms] of [['https://overpass-api.de/api/interpreter', 40000], ['https://overpass.private.coffee/api/interpreter', 20000], ['https://maps.mail.ru/osm/tools/overpass/api/interpreter', 20000]]) {
+  for (const [srv, ms] of [['https://overpass-api.de/api/interpreter', 70000], ['https://overpass.private.coffee/api/interpreter', 20000], ['https://maps.mail.ru/osm/tools/overpass/api/interpreter', 20000]]) {
     try {
       const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), ms);
       const r = await fetch(srv, { method: 'POST', body: 'data=' + encodeURIComponent(ql), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctl.signal });
