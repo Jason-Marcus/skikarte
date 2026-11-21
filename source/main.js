@@ -1231,7 +1231,10 @@ function setHuts(list) {
     let best = null, bd = 260; for (const [id, d] of near(x, z, 260)) if (d < bd) { bd = d; best = id; }
     if (best === null) continue;
     const hh = heightAt(x, z);
-    if (bd > 120 && hh < VALLEY_H - 250) continue;          // valley restaurants only if right at the piste
+    // valley villages: lowest lift station within 3 km defines the local valley floor
+    let floor = Infinity; for (const l of lifts) { const b0 = G.nodes[l.bottom]; if (Math.hypot(b0.x - x, b0.z - z) < 3000) floor = Math.min(floor, b0.h); }
+    if (!isFinite(floor)) floor = VALLEY_H - 350;
+    if (bd > 60 && hh < floor + 120) continue;               // in the village only if right at the piste / lift
     huts.push({ ...h, x, z, h: hh, node: best, dist: bd });
   }
   // dedupe same name within 80 m
