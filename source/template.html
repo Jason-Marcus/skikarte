@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>3D Skikarte</title>
+<style>
+  :root { --ink:#0b1a2a; --mut:#5d6f80; --card:rgba(255,255,255,.88); --line:rgba(11,26,42,.08); --acc:#0e6bd8; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; overflow:hidden; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--ink);
+    background: linear-gradient(180deg,#9cc3e6 0%,#cfe0ee 55%,#e9f0f6 100%); }
+  #c { position:fixed; inset:0; width:100%; height:100%; touch-action:none; display:block; }
+  #labels { position:fixed; inset:0; pointer-events:none; overflow:hidden; }
+  .lbl { position:absolute; left:0; top:0; font-weight:650; font-size:13px; padding:3px 8px; border-radius:999px; background:var(--ink); color:#fff; white-space:nowrap; box-shadow:0 2px 8px rgba(0,0,0,.25); }
+  .lbl::after { content:""; position:absolute; left:50%; bottom:-5px; width:2px; height:6px; background:var(--ink); transform:translateX(-50%); }
+  .glass { background:var(--card); backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3); border:1px solid rgba(255,255,255,.6); box-shadow:0 6px 24px rgba(11,26,42,.14); }
+  header { position:fixed; top:max(10px, env(safe-area-inset-top)); left:10px; right:10px; display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:16px; }
+  header h1 { font-size:16px; margin:0; letter-spacing:-.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  header .sub { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  header .sub { font-size:11.5px; color:var(--mut); margin-top:1px; }
+  header .grow { flex:1; min-width:0; }
+  .chip { font-size:10.5px; font-weight:600; color:#8a5a00; background:#fff3d6; border-radius:999px; padding:4px 8px; white-space:nowrap; }
+  #compass { width:38px; height:38px; border-radius:50%; display:grid; place-items:center; flex:none; cursor:pointer; border:0; padding:0; }
+  #compass-needle { width:14px; height:26px; position:relative; }
+  #compass-needle::before { content:""; position:absolute; left:0; top:0; border-left:7px solid transparent; border-right:7px solid transparent; border-bottom:13px solid #d8352a; }
+  #compass-needle::after { content:""; position:absolute; left:0; bottom:0; border-left:7px solid transparent; border-right:7px solid transparent; border-top:13px solid #9aa8b5; }
+  #legend { position:fixed; top:calc(max(10px, env(safe-area-inset-top)) + 70px); right:10px; padding:8px 10px; border-radius:12px; font-size:11px; transition:opacity .2s; }
+  #legend.dim { opacity:.35; }
+  #legend b { display:block; font-size:10.5px; color:var(--mut); font-weight:600; margin-bottom:4px; }
+  .lg { display:flex; align-items:center; gap:6px; line-height:18px; font-variant-numeric:tabular-nums; }
+  .sw { width:14px; height:10px; border-radius:3px; }
+  #info { position:fixed; left:10px; right:10px; bottom:calc(max(12px, env(safe-area-inset-bottom)) + 82px); padding:12px 14px; border-radius:16px; }
+  .i-big { font-size:30px; font-weight:750; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+  .i-big span { font-size:17px; color:var(--ink); font-weight:600; }
+  .i-row { display:flex; gap:12px; flex-wrap:wrap; font-size:12.5px; color:var(--mut); margin-top:2px; }
+  #profile { position:fixed; left:10px; right:10px; bottom:calc(max(12px, env(safe-area-inset-bottom)) + 82px); padding:10px 12px 8px; border-radius:16px; }
+  .stats { display:grid; grid-template-columns: repeat(4, 1fr); gap:6px; margin-bottom:6px; }
+  .st { min-width:0; }
+  .st small { display:block; font-size:10px; color:var(--mut); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .st div { font-size:13.5px; font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .stats2 { display:grid; grid-template-columns: 1fr 1fr; gap:6px; margin-bottom:6px; }
+  .stats2 .st div { font-size:17px; }
+  #pc { width:100%; height:104px; display:block; }
+  nav { position:fixed; left:10px; right:10px; bottom:max(12px, env(safe-area-inset-bottom)); display:flex; gap:6px; padding:6px; border-radius:18px; align-items:center; }
+  nav button { flex:1; border:0; background:transparent; font:inherit; font-size:12.5px; font-weight:650; color:var(--ink); padding:10px 6px; border-radius:13px; display:flex; flex-direction:column; align-items:center; gap:3px; cursor:pointer; }
+  nav button svg { width:20px; height:20px; }
+  nav button.on { background:var(--ink); color:#fff; }
+  nav button.small { flex:0 0 auto; padding:10px 10px; }
+  #hint { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(max(12px, env(safe-area-inset-bottom)) + 84px); font-size:12px; color:#fff; background:rgba(11,26,42,.72); padding:6px 12px; border-radius:999px; white-space:nowrap; pointer-events:none; }
+  #info:not(.hidden) ~ #hint, #profile:not(.hidden) ~ #hint, #route:not(.hidden) ~ #hint { display:none; }
+  #attr { position:fixed; left:12px; bottom:calc(max(12px, env(safe-area-inset-bottom)) + 64px); font-size:9px; color:rgba(11,26,42,.55); pointer-events:none; display:none; }
+  .hidden { display:none !important; }
+  #route { position:fixed; left:10px; right:10px; bottom:calc(max(12px, env(safe-area-inset-bottom)) + 82px); padding:12px 12px 10px; border-radius:16px; max-height:42vh; display:flex; flex-direction:column; }
+  .xbtn { position:absolute; top:6px; right:8px; border:0; background:transparent; font-size:22px; line-height:1; color:var(--mut); cursor:pointer; padding:4px 6px; }
+  .rt-title { font-size:15px; font-weight:700; margin-bottom:8px; }
+  .seg { display:flex; background:rgba(11,26,42,.07); border-radius:10px; padding:3px; gap:3px; margin-bottom:8px; }
+  .seg button { flex:1; border:0; background:transparent; font:inherit; font-size:12.5px; font-weight:650; padding:7px 4px; border-radius:8px; color:var(--ink); cursor:pointer; }
+  .seg button.on { background:#fff; box-shadow:0 1px 4px rgba(11,26,42,.15); }
+  .seg button[data-r="1"].on { color:#1f6fd1; } .seg button[data-r="2"].on { color:#d7262b; } .seg button[data-r="3"].on { color:#15171a; }
+  .rt-hint { font-size:13.5px; color:var(--ink); padding:4px 2px 6px; }
+  .rt-hint.warn { color:#a3401a; }
+  .rt-big { font-size:22px; font-weight:750; letter-spacing:-.02em; }
+  #rt-steps { list-style:none; margin:8px 0 6px; padding:0; overflow-y:auto; flex:1; min-height:0; }
+  #rt-steps li { display:flex; gap:10px; align-items:flex-start; padding:7px 0; border-top:1px solid var(--line); font-size:13.5px; }
+  #rt-steps li small { display:block; color:var(--mut); font-size:11.5px; margin-top:1px; }
+  #rt-steps .ic { width:14px; height:14px; border-radius:4px; flex:none; margin-top:3px; display:grid; place-items:center; font-size:14px; }
+  #rt-steps .ic.lift, #rt-steps .ic.walk { width:18px; background:none; margin-top:0; }
+  #rt-steps .dn { color:#a3401a; font-weight:600; }
+  .rt-opts { display:flex; gap:6px; margin-top:6px; } .rt-opts .tg { margin-top:0; flex:1; }
+  .rt-body { display:flex; flex-direction:column; min-height:0; flex:1; overflow-y:auto; }
+  .tg-down { margin-top:6px; flex:none; }
+  .tabs { display:flex; gap:16px; margin:0 0 8px; padding-right:28px; }
+  .tabs button { border:0; background:none; font:inherit; font-size:15px; font-weight:700; color:var(--mut); padding:2px 0 4px; border-bottom:2.5px solid transparent; cursor:pointer; }
+  .tabs button.on { color:var(--ink); border-bottom-color:var(--ink); }
+  .mt-pt { display:flex; gap:10px; align-items:center; padding:7px 8px; border-radius:10px; cursor:pointer; }
+  .mt-pt small, .mt-name small { display:block; color:var(--mut); font-size:11.5px; font-weight:500; }
+  .mt-pt .pin { font-size:18px; }
+  .mt-pt.active, .mt-row.active { background:rgba(14,107,216,.09); box-shadow: inset 0 0 0 1.5px rgba(14,107,216,.45); }
+  .mt-tap { font-size:12px; color:#0e6bd8; font-weight:600; margin:4px 2px 6px; }
+  .mt-fair { font-size:12.5px; color:#1a7a44; font-weight:600; margin:0 2px 6px; }
+  .mt-row { display:flex; gap:9px; align-items:flex-start; padding:8px; border-radius:10px; cursor:pointer; border-top:1px solid var(--line); }
+  .mt-row .dot { width:12px; height:12px; border-radius:50%; flex:none; margin-top:4px; box-shadow:0 0 0 2px #fff, 0 0 0 3px rgba(11,26,42,.15); }
+  .mt-main { flex:1; min-width:0; }
+  .mt-name { font-weight:700; font-size:14px; }
+  .mt-res { font-size:12.5px; margin-top:2px; } .mt-res .mut { color:var(--mut); } .mt-res .warn { color:#a3401a; }
+  .mt-chain { font-size:11.5px; color:var(--mut); margin-top:2px; line-height:1.35; }
+  .rks { display:flex; gap:5px; margin-top:2px; flex:none; }
+  .rk { width:20px; height:20px; border-radius:50%; border:0; padding:0; cursor:pointer; opacity:.35; }
+  .rk.on { opacity:1; box-shadow:0 0 0 2px #fff, 0 0 0 4px currentColor; }
+  .rk1 { background:#1f6fd1; color:#1f6fd1; } .rk2 { background:#d7262b; color:#d7262b; } .rk3 { background:#15171a; color:#15171a; }
+  .mt-x { border:0; background:none; color:var(--mut); font-size:18px; line-height:1; padding:0 2px; cursor:pointer; }
+  #mt-all { font-size:14px; margin:6px 2px 0; } #mt-all:empty { display:none; }
+  .tg:disabled { opacity:.45; }
+  .lbl.mt::after { background:var(--c, #0b1a2a); }
+  .lbl.lift { background:#fff; color:var(--ink); font-size:11px; font-weight:650; padding:2px 7px; }
+  .lbl.lift::after { background:#fff; }
+  .lbl.rt-a { background:#1a9e55; } .lbl.rt-a::after { background:#1a9e55; }
+  .lbl.rt-b { background:#d7262b; } .lbl.rt-b::after { background:#d7262b; }
+  #legend i { font-style:normal; color:var(--mut); }
+  .tg { margin-top:6px; width:100%; border:1px solid var(--line); background:#fff; color:var(--ink); font:inherit; font-size:11px; font-weight:650; padding:5px 6px; border-radius:8px; cursor:pointer; }
+  .tg.on { background:var(--ink); color:#fff; }
+  #pr-close { position:absolute; top:6px; right:8px; border:0; background:transparent; font-size:22px; line-height:1; color:var(--mut); cursor:pointer; padding:4px 6px; }
+  .ph { display:flex; gap:10px; align-items:center; margin-bottom:8px; padding-right:24px; }
+  .badge { min-width:30px; height:30px; padding:0 6px; border-radius:9px; display:grid; place-items:center; color:#fff; font-weight:750; font-size:13px; flex:none; }
+  .badge.lift { background:#eef2f6; font-size:17px; }
+  .pt { font-size:16px; font-weight:700; letter-spacing:-.01em; }
+  .ps { font-size:12px; color:var(--mut); }
+  .st .sm { font-size:12px; font-weight:500; color:var(--mut); }
+  #about { position:fixed; inset:0; background:rgba(11,26,42,.35); display:flex; align-items:flex-end; z-index:10; }
+  #about .sheet { width:100%; margin:10px; margin-bottom:max(12px, env(safe-area-inset-bottom)); padding:16px 16px 12px; border-radius:20px; font-size:13.5px; line-height:1.45; }
+  #about h2 { margin:0 0 6px; font-size:17px; }
+  #about p { margin:6px 0; }
+  #about .muted { color:var(--mut); font-size:12px; }
+  #about button { margin-top:8px; width:100%; border:0; background:var(--ink); color:#fff; font:inherit; font-weight:650; padding:11px; border-radius:12px; }
+  #start, #loading { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:16px; background: linear-gradient(180deg,#9cc3e6 0%,#cfe0ee 55%,#e9f0f6 100%); }
+  .st-card, .ld-card { width:100%; max-width:440px; background:var(--card); backdrop-filter:blur(14px); border-radius:22px; padding:22px 18px 14px; box-shadow:0 10px 40px rgba(11,26,42,.18); }
+  .st-logo { font-size:38px; } .st-card h1 { margin:4px 0 2px; font-size:24px; letter-spacing:-.02em; } .st-card p { margin:0 0 14px; color:var(--mut); font-size:14px; }
+  #sr-input { width:100%; font:inherit; font-size:16px; padding:12px 14px; border-radius:12px; border:1px solid rgba(11,26,42,.15); background:#fff; outline:none; }
+  #sr-input:focus { border-color:var(--acc); box-shadow:0 0 0 3px rgba(14,107,216,.15); }
+  .sr-chips { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 6px; }
+  .sr-chip { border:1px solid var(--line); background:#fff; font:inherit; font-size:12.5px; font-weight:600; padding:6px 10px; border-radius:999px; cursor:pointer; }
+  #sr-list { list-style:none; margin:6px 0 0; padding:0; max-height:46vh; overflow-y:auto; }
+  #sr-list li { padding:11px 6px; border-top:1px solid var(--line); cursor:pointer; }
+  #sr-list li b { display:block; font-size:15px; } #sr-list li small { color:var(--mut); font-size:12.5px; }
+  #sr-list li.sr-msg { cursor:default; color:var(--mut); font-size:13.5px; } #sr-list li.warn { color:#a3401a; }
+  .st-src { font-size:10.5px; color:var(--mut); margin-top:10px; }
+  .ld-card { text-align:center; padding:26px 20px; }
+  .ld-spin { font-size:34px; animation: bob 1.4s ease-in-out infinite; } @keyframes bob { 50% { transform: translateY(-6px) rotate(-6deg); } }
+  #ld-text { font-weight:650; margin:10px 0 12px; font-size:14.5px; }
+  .ld-track { height:6px; background:rgba(11,26,42,.08); border-radius:9px; overflow:hidden; } #ld-bar { height:100%; width:0; background:var(--acc); transition:width .25s; }
+  #ld-back { margin-top:14px; }
+  .sw-btn { width:38px; height:38px; border-radius:50%; border:0; background:#fff; font-size:17px; cursor:pointer; flex:none; box-shadow:0 2px 8px rgba(11,26,42,.12); }
+  .wx-chip { border:0; background:#fff; border-radius:999px; padding:5px 10px; display:flex; gap:5px; align-items:center; font:inherit; font-size:14px; cursor:pointer; flex:none; box-shadow:0 2px 8px rgba(11,26,42,.12); }
+  .wx-chip small { color:var(--mut); font-size:10.5px; }
+  #wx { position:fixed; inset:0; background:rgba(11,26,42,.35); display:flex; align-items:flex-end; z-index:10; }
+  #wx .sheet { width:100%; margin:10px; margin-bottom:max(12px, env(safe-area-inset-bottom)); padding:16px; border-radius:20px; position:relative; max-width:520px; margin-left:auto; margin-right:auto; }
+  #wx h2 { margin:0 0 8px; font-size:17px; }
+  .wx-now { display:flex; gap:12px; align-items:flex-start; } .wx-big { font-size:40px; line-height:1; } .wx-t { font-weight:700; font-size:16px; }
+  .wx-row { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:13px; color:var(--mut); margin-top:3px; } .wx-row b { color:var(--ink); }
+  .wx-days { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px; }
+  .wx-day { background:rgba(11,26,42,.05); border-radius:12px; padding:8px; display:flex; flex-direction:column; gap:2px; font-size:12px; color:var(--mut); }
+  .wx-day b { color:var(--ink); font-size:13px; } .wx-ic { font-size:22px; }
+  .wx-src { font-size:10.5px; color:var(--mut); margin-top:10px; } .wx-src a { color:inherit; }
+  @media (min-width: 700px) { #info, #profile { left:auto; width:420px; } nav { left:auto; width:420px; } #hint { left:auto; right:10px; transform:none; } }
+</style>
+</head>
+<body>
+<div id="start" class="hidden">
+  <div class="st-card">
+    <div class="st-logo">⛷️</div>
+    <h1>3D Skikarte</h1>
+    <p>Jedes Skigebiet in 3D – mit echter Steilheit, Routenplaner und Treffpunkt.</p>
+    <input id="sr-input" type="search" placeholder="Skigebiet suchen, z. B. Ischgl" autocomplete="off">
+    <div class="sr-chips"><button class="sr-chip">Mayrhofen</button><button class="sr-chip">Ischgl</button><button class="sr-chip">Sölden</button><button class="sr-chip">Saalbach</button><button class="sr-chip">Zermatt</button><button class="sr-chip">Kitzbühel</button></div>
+    <ul id="sr-list"></ul>
+    <div class="st-src">Pisten &amp; Lifte: © OpenStreetMap-Mitwirkende via OpenSkiMap</div>
+  </div>
+</div>
+<div id="loading" class="hidden">
+  <div class="ld-card">
+    <div class="ld-spin">⛷️</div>
+    <div id="ld-text">Lade …</div>
+    <div class="ld-track"><div id="ld-bar"></div></div>
+    <button id="ld-back" class="tg hidden">Anderes Skigebiet wählen</button>
+  </div>
+</div>
+<canvas id="c"></canvas>
+<div id="labels"></div>
+
+<header class="glass">
+  <div class="grow">
+    <h1 id="hd-name">3D Skikarte</h1>
+    <div class="sub" id="hd-sub"></div>
+  </div>
+  <button id="wx-chip" class="wx-chip hidden"></button>
+  <button id="btn-switch" class="sw-btn" title="Skigebiet wechseln">⇄</button>
+  <button id="compass" class="glass" title="Ansicht zurücksetzen"><div id="compass-needle"></div></button>
+</header>
+
+<div id="legend" class="glass">
+  <div id="lg-pisten">
+    <b>Pisten</b>
+    <div class="lg"><span class="sw" style="background:#1f6fd1"></span>Leicht</div>
+    <div class="lg"><span class="sw" style="background:#d7262b"></span>Mittel</div>
+    <div class="lg"><span class="sw" style="background:#15171a"></span>Schwer</div>
+    <div class="lg"><span class="sw" style="background:#2e9d4f"></span>Übungs&shy;gelände</div>
+  </div>
+  <div id="lg-steil" class="hidden">
+    <b>Gefälle</b>
+    <div class="lg"><span class="sw" style="background:#3fb37f"></span>&lt; 25 % <i>&lt;14°</i></div>
+    <div class="lg"><span class="sw" style="background:#f2c230"></span>25–40 % <i>14–22°</i></div>
+    <div class="lg"><span class="sw" style="background:#f08a24"></span>40–60 % <i>22–31°</i></div>
+    <div class="lg"><span class="sw" style="background:#d8352a"></span>60–80 % <i>31–39°</i></div>
+    <div class="lg"><span class="sw" style="background:#a52a8a"></span>80–100 % <i>39–45°</i></div>
+    <div class="lg"><span class="sw" style="background:#4b2391"></span>&gt; 100 % <i>&gt;45°</i></div>
+  </div>
+  <button id="tg-slope" class="tg">Gelände einfärben</button>
+</div>
+
+<div id="info" class="glass hidden"></div>
+<div id="profile" class="glass hidden">
+  <button id="pr-close" aria-label="Schließen">×</button>
+  <div id="pr-head" class="hidden"></div>
+  <div class="stats2">
+    <div class="st"><small id="st-max-l">Max. Gefälle</small><div id="st-max"></div></div>
+    <div class="st" id="st-fall-box"><small id="st-fall-l"></small><div id="st-fall"></div></div>
+  </div>
+  <div class="stats">
+    <div class="st"><small>Länge</small><div id="st-len"></div></div>
+    <div class="st" style="grid-column:span 2"><small>Höhenmeter</small><div id="st-hm"></div></div>
+    <div class="st"><small>Ø Gefälle</small><div id="st-avg"></div></div>
+  </div>
+  <canvas id="pc"></canvas>
+</div>
+<div id="route" class="glass hidden">
+  <button id="rt-close" class="xbtn" aria-label="Schließen">×</button>
+  <div id="rt-tabs" class="tabs"><button data-t="route" class="on">Route</button><button data-t="meet">Treffpunkt</button></div>
+  <div id="rt-route-body" class="rt-body">
+    <div id="rt-seg" class="seg"><button data-r="1">Nur blau</button><button data-r="2">Bis rot</button><button data-r="3">Auch schwarz</button></div>
+    <div id="rt-sum"></div>
+    <ol id="rt-steps"></ol>
+    <div class="rt-opts"><button id="rt-swap" class="tg">Start ⇄ Ziel</button></div>
+  </div>
+  <div id="rt-meet-body" class="rt-body hidden">
+    <div id="mt-point"></div>
+    <div id="mt-list"></div>
+    <div id="mt-all"></div>
+    <div class="rt-opts"><button id="mt-add" class="tg">+ Person</button><button id="mt-fair" class="tg">Fairen Treffpunkt finden</button><button id="mt-copy" class="tg">Text kopieren</button></div>
+  </div>
+  <button id="rt-down" class="tg tg-down">Talfahrt mit Gondel erlauben</button>
+</div>
+<div id="hint"></div>
+
+<nav class="glass">
+  <button id="btn-pisten" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18L14 6l-4 7-2-3z"/></svg>Pisten</button>
+  <button id="btn-steil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20 20 4M4 20h16M15 20a11 11 0 0 0-3.2-7.8"/></svg>Steilheit</button>
+  <button id="btn-route"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="2"/><path d="M18 3a3 3 0 0 0-3 3c0 2.2 3 5 3 5s3-2.8 3-5a3 3 0 0 0-3-3z"/><path d="M8 19h6a3.5 3.5 0 0 0 0-7H10a3.5 3.5 0 0 1 0-7h1"/></svg>Route</button>
+  <button id="btn-measure"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M6.5 7.5c4 1 3 6 6 7s4 1.5 5 2"/></svg>Messen</button>
+  <button id="btn-undo" class="small hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/></svg>Zurück</button>
+  <button id="btn-clear" class="small hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>Löschen</button>
+  <button id="btn-about" class="small"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>Info</button>
+  <button id="btn-reset" class="hidden"></button>
+</nav>
+
+<div id="wx" class="hidden">
+  <div class="sheet glass">
+    <button id="wx-close" class="xbtn" aria-label="Schließen">×</button>
+    <h2>Wetter</h2>
+    <div id="wx-body"></div>
+  </div>
+</div>
+<div id="about" class="hidden">
+  <div class="sheet glass">
+    <h2>Was du hier siehst</h2>
+    <p>Das Skigebiet auf echtem Gelände. <b>Pisten</b> zeigt die Schwierigkeit, <b>Steilheit</b> färbt jede Piste nach dem berechneten Gefälle. Tippe auf eine Piste für Profil und maximales Gefälle, auf einen Lift für die Eckdaten oder ins Gelände für die Hangneigung.</p>
+    <p><b>Route</b> plant die schnellste Verbindung über Pisten und Lifte, <b>Treffpunkt</b> findet für mehrere Leute einen fairen Treffpunkt. Zeiten sind Schätzungen. Ob eine Gondel-Talfahrt erlaubt ist, bitte vor Ort prüfen.</p>
+    <p class="muted">Pisten &amp; Lifte: © OpenStreetMap-Mitwirkende (ODbL), aufbereitet von OpenSkiMap. Höhendaten: Terrain Tiles (Mapzen, AWS Open Data; Quellen u. a. SRTM, EU-DEM – Liste: github.com/tilezen/joerd). Wetter: Open-Meteo.com (CC BY 4.0). Gefälle über 40 m gemittelt, kurze Steilstufen werden eher unterschätzt. Schätzwerte, keine offiziellen Pistenangaben. Lift-Animation beschleunigt und Kabinen vergrößert. <b id="src-note"></b></p>
+    <button id="about-close">Verstanden</button>
+  </div>
+</div>
+
+<img id="img-base" class="hidden" alt="">
+<img id="img-slope" class="hidden" alt="">
+<script>
+document.getElementById('btn-about').onclick = () => document.getElementById('about').classList.remove('hidden');
+document.getElementById('about-close').onclick = () => document.getElementById('about').classList.add('hidden');
+document.getElementById('compass').onclick = () => document.getElementById('btn-reset').click();
+</script>
+<script>__APP__</script>
+</body>
+</html>

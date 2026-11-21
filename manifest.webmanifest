@@ -1,0 +1,15 @@
+{
+  "name": "3D Skikarte",
+  "short_name": "Skikarte",
+  "description": "Jedes Skigebiet in 3D – echte Steilheit, Routenplaner, Treffpunkt und Wetter.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#cfe0ee",
+  "theme_color": "#9cc3e6",
+  "lang": "de",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
