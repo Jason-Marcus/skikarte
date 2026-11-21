@@ -157,7 +157,7 @@ async function loadHuts(bb) {
   const box = `${bb.s.toFixed(5)},${bb.w.toFixed(5)},${bb.n.toFixed(5)},${bb.e.toFixed(5)}`;
   const A = '["amenity"~"^(restaurant|cafe|bar|pub|fast_food|biergarten)$"]', T = '["tourism"~"^(alpine_hut|wilderness_hut)$"]';
   const ql = `[out:json][timeout:60];(node${A}(${box});way${A}(${box});node${T}(${box});way${T}(${box}););out center tags qt;`;
-  for (const [srv, ms] of [['https://overpass-api.de/api/interpreter', 45000], ['https://overpass.private.coffee/api/interpreter', 25000], ['https://maps.mail.ru/osm/tools/overpass/api/interpreter', 25000]]) {
+  for (const [srv, ms] of [['https://overpass-api.de/api/interpreter', 40000], ['https://overpass.private.coffee/api/interpreter', 20000], ['https://maps.mail.ru/osm/tools/overpass/api/interpreter', 20000]]) {
     try {
       const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), ms);
       const r = await fetch(srv, { method: 'POST', body: 'data=' + encodeURIComponent(ql), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctl.signal });
@@ -425,11 +425,19 @@ async function start(area) {
     else if (!rec) toast('Karte gespeichert – funktioniert jetzt auch ohne Internet.');
     // huts (non-blocking, saved with the map)
     if (rec && rec.huts) window.__app.setHuts(rec.huts);
-    else loadHuts({ w: bbox.fw - 0.004, e: bbox.fe + 0.004, s: bbox.fs - 0.003, n: bbox.fn + 0.003 }).then(async huts => {
-      const n = window.__app.setHuts(huts);
-      const r2 = await IDB.get(area.id); if (r2) { r2.huts = huts; IDB.put(r2); }
-      if (n) toast(`${n} Hütten und Restaurants an den Pisten geladen.`);
-    }).catch(() => toast('Hütten konnten gerade nicht geladen werden (OpenStreetMap-Server ausgelastet).', 'Nochmal', () => location.reload()));
+    else {
+      const hb = { w: bbox.fw - 0.004, e: bbox.fe + 0.004, s: bbox.fs - 0.003, n: bbox.fn + 0.003 };
+      const tryHuts = attempt => loadHuts(hb).then(async huts => {
+        const n = window.__app.setHuts(huts);
+        const r2 = await IDB.get(area.id); if (r2) { r2.huts = huts; IDB.put(r2); }
+        if (n) toast(`${n} Hütten und Restaurants an den Pisten geladen.`);
+      }).catch(() => {
+        // public OpenStreetMap servers are often busy for a moment: try again quietly in the background
+        if (attempt < 3) setTimeout(() => tryHuts(attempt + 1), [20000, 60000, 180000][attempt]);
+        else toast('Hütten konnten gerade nicht geladen werden (OpenStreetMap-Server ausgelastet).', 'Nochmal', () => tryHuts(0));
+      });
+      tryHuts(0);
+    }
     // weather (non-blocking, cached for offline)
     let hl = Infinity, hh = -Infinity;
     for (const r of window.__app.runs) for (const q of r.s) { hl = Math.min(hl, q.h); hh = Math.max(hh, q.h); }
