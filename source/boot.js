@@ -115,21 +115,23 @@ function chooseArea(a) { LS.set('skiarea', a); location.hash = ''; location.relo
 // ---------------- loading a ski area ----------------
 
 // ---------------- Overpass fallback (raw OpenStreetMap) ----------------
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+const OVERPASS = [['https://overpass-api.de/api/interpreter', 55000], ['https://overpass-api.de/api/interpreter', 45000, 4000], ['https://overpass.private.coffee/api/interpreter', 30000], ['https://maps.mail.ru/osm/tools/overpass/api/interpreter', 30000]];
 const LIFT_MAP = { cable_car: 'cable_car', gondola: 'gondola', chair_lift: 'chair_lift', mixed_lift: 'mixed_lift', drag_lift: 't-bar', 't-bar': 't-bar', 'j-bar': 'j-bar', platter: 'platter', rope_tow: 'rope_tow', magic_carpet: 'magic_carpet' };
 const DIFF_MAP = { novice: 'novice', easy: 'easy', intermediate: 'intermediate', advanced: 'advanced', expert: 'expert', freeride: 'freeride', extreme: 'expert' };
 async function loadOverpass(bb) {
   const box = `${bb.s.toFixed(5)},${bb.w.toFixed(5)},${bb.n.toFixed(5)},${bb.e.toFixed(5)}`;
   const ql = `[out:json][timeout:90];(way["piste:type"="downhill"](${box});way["aerialway"](${box});relation["piste:type"="downhill"](${box}););out tags geom qt;`;
-  let j = null, lastErr = null;
-  for (const srv of OVERPASS) {
+  let j = null, lastErr = null; const t0 = Date.now();
+  for (const [srv, ms, wait] of OVERPASS) {
+    if (Date.now() - t0 > 120000) break;                 // overall budget: 2 minutes
+    if (wait) await new Promise(r => setTimeout(r, wait));
     try {
       progress('Pisten direkt aus OpenStreetMap laden … (kann bis zu 1 Minute dauern)', 0.33);
-      const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 100000);
+      const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), ms);
       const r = await fetch(srv, { method: 'POST', body: 'data=' + encodeURIComponent(ql), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctl.signal });
-      clearTimeout(to);
+      const txt = await r.text(); clearTimeout(to);
       if (!r.ok) { lastErr = new Error('Overpass ' + r.status); continue; }
-      j = await r.json(); break;
+      j = JSON.parse(txt); break;
     } catch (e) { lastErr = e; }
   }
   if (!j) throw lastErr || new Error('Overpass nicht erreichbar');
@@ -220,7 +222,8 @@ async function loadFeatures(area) {
       if (ovKm > tileKm) data = { v: 5, runs: ov.runs, lifts: ov.lifts, src: 'OpenStreetMap (Overpass)' };
     } catch (e) { console.warn('Overpass fallback failed', e); data.partial = true; }
   }
-  LS.set('sa:' + area.id, data);
+  if (data.partial && !data.runs.length) throw new Error('BUSY');
+  if (!data.partial) LS.set('sa:' + area.id, data);
   return data;
 }
 
@@ -356,14 +359,16 @@ async function start(area) {
     runApp();
     $('loading').classList.add('hidden');
     $('src-note').textContent = 'Pistendaten für dieses Gebiet: ' + (data.src || 'OpenSkiMap') + (data.partial ? ' – möglicherweise unvollständig.' : '.');
+    if (data.partial) { const t = $('toast'); t.innerHTML = 'Einige Pisten fehlen evtl. – die OpenStreetMap-Server waren überlastet. <button id="toast-retry">Später neu laden</button>'; t.classList.remove('hidden'); $('toast-retry').onclick = () => location.reload(); setTimeout(() => t.classList.add('hidden'), 12000); }
     // weather (non-blocking)
     let hl = Infinity, hh = -Infinity;
     for (const r of window.__app.runs) for (const q of r.s) { hl = Math.min(hl, q.h); hh = Math.max(hh, q.h); }
     loadWeather((s + n) / 2, (w + e) / 2, hl, hh).then(renderWeather).catch(() => { $('wx-chip').classList.add('hidden'); });
   } catch (err) {
     console.error(err);
-    $('ld-text').textContent = (err && err.message && !/fetch/i.test(err.message)) ? err.message : 'Daten konnten nicht geladen werden. Internetverbindung prüfen.';
-    $('ld-bar').style.width = '0%'; $('ld-back').classList.remove('hidden');
+    $('ld-text').textContent = err && err.message === 'BUSY' ? 'Die OpenStreetMap-Server sind gerade überlastet. Bitte in ein paar Minuten erneut versuchen.'
+      : (err && err.message && !/fetch|abort|json/i.test(err.message)) ? err.message : 'Daten konnten nicht geladen werden. Internetverbindung prüfen und erneut versuchen.';
+    $('ld-bar').style.width = '0%'; $('ld-back').classList.remove('hidden'); $('ld-retry').classList.remove('hidden');
   }
 }
 function showStart() {
@@ -373,6 +378,7 @@ function showStart() {
   setTimeout(() => inp.focus(), 50);
 }
 $('btn-switch').onclick = $('ld-back').onclick = () => { LS.del('skiarea'); location.reload(); };
+$('ld-retry').onclick = () => location.reload();
 $('wx-chip').onclick = () => $('wx').classList.remove('hidden');
 $('wx-close').onclick = () => $('wx').classList.add('hidden');
 const area = LS.get('skiarea');

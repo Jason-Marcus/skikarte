@@ -128,7 +128,9 @@
   .ld-spin { font-size:34px; animation: bob 1.4s ease-in-out infinite; } @keyframes bob { 50% { transform: translateY(-6px) rotate(-6deg); } }
   #ld-text { font-weight:650; margin:10px 0 12px; font-size:14.5px; }
   .ld-track { height:6px; background:rgba(11,26,42,.08); border-radius:9px; overflow:hidden; } #ld-bar { height:100%; width:0; background:var(--acc); transition:width .25s; }
-  #ld-back { margin-top:14px; }
+  #ld-back, #ld-retry { margin-top:10px; }
+  #toast { position:fixed; left:10px; right:10px; top:calc(max(10px, env(safe-area-inset-top)) + 72px); padding:10px 12px; border-radius:12px; font-size:13px; z-index:6; }
+  #toast button { border:0; background:var(--ink); color:#fff; font:inherit; font-size:12px; font-weight:650; padding:5px 9px; border-radius:8px; margin-left:6px; }
   .sw-btn { width:38px; height:38px; border-radius:50%; border:0; background:#fff; font-size:17px; cursor:pointer; flex:none; box-shadow:0 2px 8px rgba(11,26,42,.12); }
   .wx-chip { border:0; background:#fff; border-radius:999px; padding:5px 10px; display:flex; gap:5px; align-items:center; font:inherit; font-size:14px; cursor:pointer; flex:none; box-shadow:0 2px 8px rgba(11,26,42,.12); }
   .wx-chip small { color:var(--mut); font-size:10.5px; }
@@ -161,6 +163,7 @@
     <div class="ld-spin">⛷️</div>
     <div id="ld-text">Lade …</div>
     <div class="ld-track"><div id="ld-bar"></div></div>
+    <button id="ld-retry" class="tg hidden">Erneut versuchen</button>
     <button id="ld-back" class="tg hidden">Anderes Skigebiet wählen</button>
   </div>
 </div>
@@ -230,6 +233,7 @@
   <button id="rt-down" class="tg tg-down">Talfahrt mit Gondel erlauben</button>
 </div>
 <div id="hint"></div>
+<div id="toast" class="glass hidden"></div>
 
 <nav class="glass">
   <button id="btn-pisten" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18L14 6l-4 7-2-3z"/></svg>Pisten</button>
