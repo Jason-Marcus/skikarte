@@ -236,15 +236,15 @@ for (const l of lifts) {
   }
   l.path = path; l.len = d;
   l.h0 = heightAt(nodes[0].x, nodes[0].z); l.h1 = heightAt(nodes[nodes.length - 1].x, nodes[nodes.length - 1].z);
-  l.gauge = aerial ? (l.cls === 'cable_car' ? 5.5 : l.cls === 'chair_lift' ? 3.2 : 3.6) : 0;
-  if (!carpet) for (const side of (aerial ? [-1, 1] : [0])) for (let i = 0; i < path.length - 1; i++) {
+  l.gauge = aerial ? (l.cls === 'cable_car' ? 5.5 : l.cls === 'chair_lift' ? 3.2 : 3.6) : drag ? 1.8 : 0;
+  if (!carpet) for (const side of (aerial || drag ? [-1, 1] : [0])) for (let i = 0; i < path.length - 1; i++) {
     const a = path[i], b = path[i + 1], L = Math.hypot(b.x - a.x, b.z - a.z) || 1, ox = (b.z - a.z) / L * l.gauge * side, oz = -(b.x - a.x) / L * l.gauge * side;
     cablePos.push(a.x + ox, a.y, a.z + oz, b.x + ox, b.y, b.z + oz);
   }
   // pylons
   for (let k = 1; k < nodes.length - 1; k++) {
     const nd = nodes[k], a = nodes[k - 1], b = nodes[k + 1], ang = Math.atan2(b.x - a.x, b.z - a.z), hgt = nd.y - nd.g;
-    _q.setFromAxisAngle(_up, ang); _m.compose(_v.set(nd.x, nd.g, nd.z), _q, _s.set(aerial ? l.gauge / 3.6 : 0.6, hgt, aerial ? 1 : 0.6)); pylonM4.push(_m.clone());
+    _q.setFromAxisAngle(_up, ang); _m.compose(_v.set(nd.x, nd.g, nd.z), _q, _s.set(aerial || drag ? l.gauge / 3.6 : 0.6, hgt, aerial ? 1 : 0.6)); pylonM4.push(_m.clone());
   }
   // stations
   const A = nodes[0], B = nodes[1], Z = nodes[nodes.length - 1], Y = nodes[nodes.length - 2];
@@ -283,7 +283,7 @@ for (const l of anim) {
   const key = cabKey(l), c = CAB[key];
   if (l.cls === 'cable_car') { cabinSlots.push({ l, c, key, shuttle: 0 }, { l, c, key, shuttle: 1 }); continue; }
   const n = Math.max(2, Math.floor(l.len / c.gap));
-  for (let i = 0; i < n; i++) { cabinSlots.push({ l, c, key, off: i / n, dir: 0 }); if (!DRAG.has(l.cls)) cabinSlots.push({ l, c, key, off: i / n, dir: 1 }); }
+  for (let i = 0; i < n; i++) { cabinSlots.push({ l, c, key, off: i / n, dir: 0 }, { l, c, key, off: (i + 0.5) / n, dir: 1 }); }
 }
 const cabMeshes = {};
 for (const key of ['gondola', 'chair_lift', 'cable_car', 'drag']) {
@@ -304,12 +304,12 @@ function updateCabins(t, camDist) {
   for (const s of cabinSlots) {
     const l = s.l, c = s.c, cm = cabMeshes[s.key];
     let d, side;
-    if (s.shuttle !== undefined) { const T = l.len / c.sp, ph = ((t * TIME_X / T) + s.shuttle) % 2; const f = ph < 1 ? ph : 2 - ph; d = (s.shuttle ? 1 - f : f) * l.len; side = s.shuttle ? 1 : -1; }
+    if (s.shuttle !== undefined) { const T = l.len / c.sp, ph = (t * TIME_X / T) % 2; const f = ph < 1 ? ph : 2 - ph; d = (s.shuttle ? 1 - f : f) * l.len; side = s.shuttle ? 1 : -1; }   // the two cabins always travel in opposite directions
     else { const f = ((s.off + t * TIME_X * c.sp / l.len) % 1); d = s.dir ? (1 - f) * l.len : f * l.len; side = s.dir ? 1 : -1; }
     const [x, y, z, dx, dz] = pathAt(l, d);
-    const ang = Math.atan2(dx, dz), off = s.key === 'drag' ? 0 : side * l.gauge;
+    const ang = Math.atan2(dx, dz), off = side * l.gauge;
     _v.set(x + Math.cos(ang) * off, y, z - Math.sin(ang) * off);
-    _q.setFromAxisAngle(_up, ang + (s.dir ? Math.PI : 0)); _s.set(k, k, k);
+    _q.setFromAxisAngle(_up, ang + (s.dir && s.shuttle === undefined ? Math.PI : 0)); _s.set(k, k, k);
     _m.compose(_v, _q, _s); cm.im.setMatrixAt(cm.n++, _m);
   }
   for (const key in cabMeshes) cabMeshes[key].im.instanceMatrix.needsUpdate = true;
