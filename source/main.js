@@ -870,7 +870,8 @@ function renderMeetPanel() {
   const P = $('route'); P.classList.remove('hidden'); ui.info.classList.add('hidden'); ui.prof.classList.add('hidden');
   $('rt-down').classList.toggle('on', route.allowDown);
   const tgtName = meet.target === null ? null : meet.target === 'meet' ? 'den Treffpunkt' : 'den Standort von ' + meet.people[meet.target].name;
-  $('mt-point').innerHTML = `<div class="mt-pt${meet.target === 'meet' ? ' active' : ''}" data-t="meet"><span class="pin">📍</span><div><b>Treffpunkt</b><small>${meet.node !== null ? placeName(meet.node) : 'noch nicht gesetzt'}</small></div></div>
+  $('mt-time').value = meet.time || '';
+  $('mt-point').innerHTML = `${meet.shared ? `<div class="mt-shared">📨 Geteilter Treffpunkt${meet.shared.p ? ': ' + esc(meet.shared.p) : ''}${meet.time ? ' · <b>' + esc(meet.time) + ' Uhr</b>' : ''}</div>` : ''}<div class="mt-pt${meet.target === 'meet' ? ' active' : ''}" data-t="meet"><span class="pin">📍</span><div><b>Treffpunkt</b><small>${meet.node !== null ? esc(placeName(meet.node)) : 'noch nicht gesetzt'}</small></div></div>
     <div class="mt-tap">${tgtName ? '👆 Tippe jetzt auf der Karte ' + tgtName : 'Zum Verschieben: Person oder Treffpunkt antippen, dann auf die Karte.'}</div>${meet.fairMsg ? `<div class="mt-fair">${meet.fairMsg}</div>` : ''}`;
   const list = $('mt-list'); list.innerHTML = '';
   meet.people.forEach((p, i) => {
@@ -879,7 +880,9 @@ function renderMeetPanel() {
     if (p.node !== null && meet.node === null) res = '<span class="mut">wartet auf Treffpunkt</span>';
     if (p.err) res = '<span class="warn">Mit dieser Schwierigkeit keine Verbindung</span>';
     if (p.res) { const st = buildSteps(p.res); const nl = st.filter(s => s.kind === 'lift').length; const mg = st.filter(s => s.kind === 'run').reduce((a, s) => Math.max(a, s.g), 0);
-      res = p.res.time === 0 ? '<b>ist schon da</b>' : `<b>ca. ${fmtMin(p.res.time)}</b> · ${nl} ${nl === 1 ? 'Lift' : 'Lifte'} · steilste <span style="color:${pctCss(mg)}">${Math.round(mg)} %</span><div class="mt-chain">${chainText(p.res)}</div>`; }
+      let leave = '';
+      if (meet.time && /^\d{1,2}:\d{2}$/.test(meet.time) && p.res.time > 0) { const [hh, mm] = meet.time.split(':').map(Number); const t = new Date(); t.setHours(hh, mm, 0, 0); t.setMinutes(t.getMinutes() - Math.ceil(p.res.time / 60) - 5); leave = ` · <b class="leave">losfahren bis ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}</b>`; }
+      res = p.res.time === 0 ? '<b>ist schon da</b>' : `<b>ca. ${fmtMin(p.res.time)}</b>${leave} · ${nl} ${nl === 1 ? 'Lift' : 'Lifte'} · steilste <span style="color:${pctCss(mg)}">${Math.round(mg)} %</span><div class="mt-chain">${chainText(p.res)}</div>`; }
     row.innerHTML = `<span class="dot" style="background:${P_COL[i]}"></span><div class="mt-main"><div class="mt-name">${p.name} <small>${['', 'nur blau', 'bis rot', 'auch schwarz'][p.rank]}${p.node !== null ? ' · ' + placeName(p.node) : ''}</small></div><div class="mt-res">${res}</div></div>
       <div class="rks">${i === 0 ? '<button class="mt-me" title="Mein Standort">📍</button>' : ''}${rankDots(p, i)}</div>${i > 0 ? `<button class="mt-x" data-i="${i}" aria-label="Entfernen">×</button>` : ''}`;
     list.appendChild(row);
@@ -920,18 +923,54 @@ function fairMeet() {
   meet.node = best; meet.fairMsg = `Fairster Treffpunkt: alle sind spätestens nach ca. ${fmtMin(bt + (hutAtNode.has(best) ? 90 : 0))} dort.`;
   meet.target = nextTarget(); computeMeet();
 }
-async function copyMeet() {
-  const lines = [`Treffpunkt: ${meet.node !== null ? placeName(meet.node) : '–'}`];
-  for (const p of meet.people) if (p.res) lines.push(`${p.name}: ca. ${fmtMin(p.res.time)} – ${chainText(p.res) || 'schon da'}`);
-  const done = meet.people.filter(p => p.res); if (done.length) lines.push(`Alle da nach ca. ${fmtMin(Math.max(...done.map(p => p.res.time)))}.`);
-  const txt = lines.join('\n'), b = $('mt-copy');
-  try { await navigator.clipboard.writeText(txt); b.textContent = 'Kopiert ✓'; }
-  catch { b.textContent = 'Kopieren nicht erlaubt'; }
-  setTimeout(() => b.textContent = 'Text kopieren', 1800);
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const xzToLonLat = (x, z) => [M.B.w + (x + W / 2) / M.mlon, M.B.n - (z + H / 2) / M.mlat];
+// ---- share the meeting point as a link ----
+function meetLink() {
+  const n = G.nodes[meet.node], hu = hutAtNode.get(meet.node);
+  const [lon, lat] = hu ? [hu.lon, hu.lat] : xzToLonLat(n.x, n.z);
+  const area = window.__AREA || {};
+  const q = new URLSearchParams({ g: area.id || '', lat: lat.toFixed(5), lon: lon.toFixed(5), p: placeName(meet.node).replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '').slice(0, 60) });
+  if (meet.time) q.set('t', meet.time);
+  const base = location.protocol === 'https:' ? location.origin + location.pathname : 'https://jason-marcus.github.io/skikarte/';
+  return base + '?' + q.toString();
+}
+async function shareMeet() {
+  if (meet.node === null) { window.__toast && window.__toast('Erst einen Treffpunkt setzen.'); return; }
+  const area = window.__AREA || {}, place = placeName(meet.node);
+  const url = meetLink();
+  const text = `⛷ Treffpunkt: ${place}${meet.time ? ' um ' + meet.time + ' Uhr' : ''} (${area.name || 'Skigebiet'}). Öffne den Link – die App zeigt dir deinen Weg dorthin:`;
+  const b = $('mt-share');
+  try {
+    if (navigator.share) { await navigator.share({ title: 'Treffpunkt', text, url }); return; }
+    await navigator.clipboard.writeText(text + '\n' + url); b.textContent = 'Link kopiert ✓';
+  } catch (e) {
+    if (e && e.name === 'AbortError') return;      // user closed the share sheet
+    $('mt-linkbox').classList.remove('hidden'); $('mt-linkbox').value = text + '\n' + url; $('mt-linkbox').select(); b.textContent = 'Link unten kopieren';
+  }
+  setTimeout(() => b.textContent = 'Treffpunkt teilen', 2200);
+}
+// ---- receiving a shared meeting point ----
+function applySharedMeet(sh) {
+  const [x, z] = toXZ(sh.lon, sh.lat);
+  const node = inside(x, z) ? snap(x, z, 400) : null;
+  if (node === null) { window.__toast && window.__toast('Der geteilte Treffpunkt liegt nicht in diesem Skigebiet.'); return; }
+  setRouting(true); setTab('meet');
+  meet.node = node; meet.time = sh.t || ''; meet.people = [{ name: 'Du', rank: 2, node: null }];
+  meet.shared = sh; meet.fairMsg = ''; meet.target = 0;
+  computeMeet(false); updateUi();
+  flyTo(x, z, 2600);
+  // find my own position automatically
+  startGps(false);
+  const wait = setInterval(() => {
+    if (gps.xz) { clearInterval(wait); const a = meNode(); if (a !== null && meet.people[0].node === null) { meet.people[0].node = a; meet.target = null; computeMeet(); } }
+  }, 800);
+  setTimeout(() => clearInterval(wait), 45000);
 }
 $('mt-add').onclick = () => { const n = meet.people.length; meet.people.push({ name: 'Freund ' + n, rank: 2, node: null }); meet.target = n; renderMeetPanel(); updateUi(); };
 $('mt-fair').onclick = fairMeet;
-$('mt-copy').onclick = copyMeet;
+$('mt-share').onclick = shareMeet;
+$('mt-time').onchange = () => { meet.time = $('mt-time').value; renderMeetPanel(); };
 function setTab(t) {
   tab = t;
   document.querySelectorAll('#rt-tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
@@ -1363,6 +1402,6 @@ function loop() {
 }
 loop();
 
-window.__app = { setHuts, huts, showHut, nav, gps, startNav, stopNav, focusStep, camera, controls, runs, lifts, showRun, showLift, setMode, G, route, computeRoute, setRouting, buildSteps, meet, computeMeet, setTab, fairMeet, placeName };
+window.__app = { applySharedMeet, meetLink, xzToLonLat, setHuts, huts, showHut, nav, gps, startNav, stopNav, focusStep, camera, controls, runs, lifts, showRun, showLift, setMode, G, route, computeRoute, setRouting, buildSteps, meet, computeMeet, setTab, fairMeet, placeName };
 
 }

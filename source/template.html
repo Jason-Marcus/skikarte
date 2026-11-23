@@ -52,7 +52,7 @@
   .hidden { display:none !important; }
   .grab { width:44px; height:5px; border-radius:3px; background:rgba(11,26,42,.18); margin:-4px auto 8px; cursor:pointer; position:relative; }
   .grab::after { content:""; position:absolute; inset:-10px -30px; }
-  #route.mini { max-height:none; } #route.mini #rt-steps, #route.mini .rt-opts:not(#rt-navrow), #route.mini #rt-seg, #route.mini .tg-down, #route.mini #mt-list, #route.mini #mt-all { display:none !important; }
+  #route.mini { max-height:none; } #route.mini #rt-steps, #route.mini .rt-opts:not(#rt-navrow), #route.mini #rt-seg, #route.mini .tg-down, #route.mini #mt-list, #route.mini #mt-all, #route.mini #mt-linkbox { display:none !important; }
   #profile.mini #pc, #profile.mini .stats { display:none; }
   #legend { cursor:default; } #legend b { cursor:pointer; user-select:none; } #legend b::after { content:" ▾"; color:var(--mut); }
   #legend.col { padding:6px 10px; } #legend.col .lg, #legend.col .tg { display:none; } #legend.col b { margin:0; } #legend.col b::after { content:" ▸"; }
@@ -110,6 +110,12 @@
   .rk.on { opacity:1; box-shadow:0 0 0 2px #fff, 0 0 0 4px currentColor; }
   .rk1 { background:#1f6fd1; color:#1f6fd1; } .rk2 { background:#d7262b; color:#d7262b; } .rk3 { background:#15171a; color:#15171a; }
   .mt-x { border:0; background:none; color:var(--mut); font-size:18px; line-height:1; padding:0 2px; cursor:pointer; }
+  .mt-shared { font-size:13px; background:#fff3d6; color:#7a4a00; border-radius:10px; padding:7px 10px; margin-bottom:6px; }
+  .mt-timel { display:flex; align-items:center; gap:4px; border:1px solid var(--line); background:#fff; border-radius:8px; padding:0 8px; font-size:13px; }
+  .mt-timel input { border:0; font:inherit; font-size:14px; background:transparent; width:104px; outline:none; }
+  .mt-sharerow .tg.primary { flex:1.4; }
+  .leave { color:#0e6bd8; }
+  #mt-linkbox { width:100%; margin-top:6px; font:inherit; font-size:12px; border:1px solid var(--line); border-radius:8px; padding:6px; resize:none; }
   #mt-all { font-size:14px; margin:6px 2px 0; } #mt-all:empty { display:none; }
   .tg:disabled { opacity:.45; }
   .lbl.mt::after { background:var(--c, #0b1a2a); }
@@ -262,7 +268,9 @@
     <div id="mt-point"></div>
     <div id="mt-list"></div>
     <div id="mt-all"></div>
-    <div class="rt-opts"><button id="mt-add" class="tg">+ Person</button><button id="mt-fair" class="tg">Fairen Treffpunkt finden</button><button id="mt-copy" class="tg">Text kopieren</button></div>
+    <div class="rt-opts"><button id="mt-add" class="tg">+ Person</button><button id="mt-fair" class="tg">Fairen Treffpunkt finden</button></div>
+    <div class="rt-opts mt-sharerow"><label class="mt-timel">🕑 <input id="mt-time" type="time" aria-label="Uhrzeit"></label><button id="mt-share" class="tg primary">Treffpunkt teilen</button></div>
+    <textarea id="mt-linkbox" class="hidden" rows="3" readonly></textarea>
   </div>
   <button id="rt-down" class="tg tg-down">Talfahrt mit Gondel erlauben</button>
 </div>

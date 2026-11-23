@@ -418,8 +418,10 @@ async function start(area) {
     window.__META = M; window.__HGT = H; window.__FOREST = F; window.__FEATS = [...data.runs, ...data.lifts];
     window.__VIEW = { lon: (bbox.fw + bbox.fe) / 2, lat: (bbox.fs + bbox.fn) / 2, size: Math.max((bbox.fe - bbox.fw) * M.mlon, (bbox.fn - bbox.fs) * M.mlat) };
     progress('Fertig', 1);
+    window.__AREA = area;
     runApp();
     $('loading').classList.add('hidden');
+    if (window.__SHARE) { const sh = window.__SHARE; window.__SHARE = null; setTimeout(() => window.__app.applySharedMeet(sh), 300); }
     $('src-note').textContent = 'Pistendaten für dieses Gebiet: ' + (data.src || 'OpenSkiMap') + (data.partial ? ' – möglicherweise unvollständig.' : '.') + (rec ? ' Offline gespeichert am ' + new Date(rec.savedAt).toLocaleDateString('de-DE') + '.' : '');
     if (data.partial) toast('Einige Pisten fehlen evtl. – die OpenStreetMap-Server waren überlastet.', 'Später neu laden', () => location.reload());
     else if (!rec) toast('Karte gespeichert – funktioniert jetzt auch ohne Internet.');
@@ -483,5 +485,33 @@ $('ld-retry').onclick = () => location.reload();
 $('wx-chip').onclick = () => $('wx').classList.remove('hidden');
 $('wx-close').onclick = () => $('wx').classList.add('hidden');
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => { });
-const area = LS.get('skiarea');
-if (area && area.id) start(area); else showStart();
+// ---- shared meeting point link: ?g=<skiAreaId>&lat=..&lon=..&p=<place>&t=<HH:MM> ----
+function readShare() {
+  const q = new URLSearchParams(location.search); if (!q.has('g')) return null;
+  history.replaceState(null, '', location.pathname);      // keep the address clean (reload ≠ re-apply)
+  const g = q.get('g') || '', lat = +q.get('lat'), lon = +q.get('lon'), t = q.get('t') || '';
+  if (!/^[\w-]{4,80}$/.test(g) || !q.get('lat') || !q.get('lon') || !isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 85 || Math.abs(lon) > 180) return null;
+  return { g, lat, lon, p: (q.get('p') || '').slice(0, 60), t: /^([01]?\d|2[0-3]):[0-5]\d$/.test(t) ? t : '' };
+}
+async function areaById(id) {
+  const rec = await IDB.get(id).catch(() => null); if (rec && rec.area) return rec.area;
+  const f = await fetch(`${API}/features/openskimap/${id}.geojson`).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+  const p = f.properties || {}; if (p.type !== 'skiArea') throw new Error('not a ski area');
+  let center = null; const g = f.geometry;
+  if (g?.type === 'Point') center = g.coordinates;
+  else if (g) { const pts = JSON.stringify(g.coordinates).match(/-?\d+\.?\d*,-?\d+\.?\d*/g) || []; let w = 180, e = -180, s = 90, n = -90;
+    for (const pt of pts) { const [lo, la] = pt.split(',').map(Number); w = Math.min(w, lo); e = Math.max(e, lo); s = Math.min(s, la); n = Math.max(n, la); }
+    if (pts.length) center = [(w + e) / 2, (s + n) / 2]; }
+  return { id: p.id || id, name: p.name || 'Skigebiet', place: placeOf(p), km: Math.round(downhillKm(p)), center, vh: p.viewportHint || null };
+}
+(async () => {
+  const share = readShare();
+  let area = LS.get('skiarea');
+  if (share && (!area || area.id !== share.g)) {
+    $('start').classList.add('hidden'); $('loading').classList.remove('hidden'); progress('Öffne geteilten Treffpunkt …', 0.01);
+    try { area = await areaById(share.g); LS.set('skiarea', area); }
+    catch { $('loading').classList.add('hidden'); toast('Das geteilte Skigebiet konnte gerade nicht geladen werden – Internet prüfen und den Link nochmal öffnen.'); window.__SHARE = null; if (area && area.id) start(area); else showStart(); return; }
+  }
+  window.__SHARE = share;
+  if (area && area.id) start(area); else showStart();
+})();

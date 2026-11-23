@@ -12,6 +12,7 @@ Jedes Skigebiet in 3D – mit echter Steilheit, Routenplaner, Treffpunkt für Fr
 - Navigation mit GPS: mitfahrende 3D-Ansicht mit Abbiege-Hinweisen, Neuberechnung bei Abweichung, Testfahrt mit simuliertem GPS zum Ausprobieren zu Hause
 - Hütten & Restaurants an den Pisten (OpenStreetMap) mit Öffnungszeiten, „Route hierher“ und „Als Treffpunkt“
 - Treffpunkt: bis zu 4 Personen, eigene Route für jeden, „fairen Treffpunkt“ finden (auch Hütten)
+- Treffpunkt teilen: Link (z. B. per WhatsApp) mit Ort und Uhrzeit – der Empfänger öffnet ihn, die App lädt das Skigebiet, findet seinen Standort per GPS und zeigt Weg, Dauer und „losfahren bis“
 - Offline: geladene Skigebiete werden gespeichert und funktionieren ohne Internet („Meine Skigebiete“)
 - Wetter für Tal und Berg mit 3-Tage-Vorschau
 - Eigene Linie übers Gelände messen
