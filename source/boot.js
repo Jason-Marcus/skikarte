@@ -149,8 +149,9 @@ async function loadOverpass(bb) {
     const ll = t.__g.filter(Boolean).map(p => [+p.lon.toFixed(6), +p.lat.toFixed(6)]); if (ll.length < 2) continue;
     runs.push(['r', t['piste:name'] || t.name || '', t['piste:ref'] || t.ref || '', DIFF_MAP[t['piste:difficulty']] || '', '', ll]);
   }
-  for (const e of j.elements) if (e.type === 'way' && LIFT_MAP[e.tags.aerialway] && e.geometry?.length > 1 && !e.tags.disused && e.tags['disused:aerialway'] === undefined)
-    lifts.push(['l', e.tags.name || '', e.tags.ref || '', LIFT_MAP[e.tags.aerialway], e.tags['aerialway:capacity'] || '', e.geometry.map(p => [+p.lon.toFixed(6), +p.lat.toFixed(6)])]);
+  // only ways whose main tag is a lift; contradicting disused/construction tags → shown as "status unclear"
+  for (const e of j.elements) if (e.type === 'way' && LIFT_MAP[e.tags.aerialway] && e.geometry?.length > 1)
+    lifts.push(['l', e.tags.name || '', e.tags.ref || '', LIFT_MAP[e.tags.aerialway], e.tags['aerialway:capacity'] || '', e.geometry.map(p => [+p.lon.toFixed(6), +p.lat.toFixed(6)]), liftUnclear(e.tags) ? 'u' : '']);
   return { runs, lifts };
 }
 async function loadHuts(bb) {
@@ -171,9 +172,30 @@ async function loadHuts(bb) {
 }
 const lineKm = ln => { let s = 0; for (let i = 1; i < ln.length; i++) s += Math.hypot((ln[i][0] - ln[i - 1][0]) * 111320 * Math.cos(ln[i][1] * Math.PI / 180), (ln[i][1] - ln[i - 1][1]) * 111320); return s / 1000; };
 
+
+// ---------------- lift status ----------------
+// "unclear": OSM still has the main aerialway tag, but also says disused / abandoned / under construction (e.g. Cime Caron, Val Thorens)
+const liftUnclear = t => !!(t && (t.disused === 'yes' || t.abandoned === 'yes' || t.construction === 'yes' || t['disused:aerialway'] || t['abandoned:aerialway'] || t['construction:aerialway'] || t['razed:aerialway']));
+async function osmWayTags(ids) { // official OSM API; one request per 100 ways, split when a way no longer exists (404)
+  const out = new Map();
+  async function get(list) {
+    if (!list.length) return;
+    const r = await fetch('https://api.openstreetmap.org/api/0.6/ways.json?ways=' + list.join(','));
+    if (r.ok) { for (const e of (await r.json()).elements || []) out.set(e.id, e.tags || {}); return; }
+    if ((r.status === 404 || r.status === 410) && list.length > 1) { const h = list.length >> 1; await get(list.slice(0, h)); await get(list.slice(h)); return; }
+    if (r.status !== 404 && r.status !== 410) throw new Error('OSM ' + r.status);
+  }
+  for (let i = 0; i < ids.length; i += 100) await get(ids.slice(i, i + 100));
+  return out;
+}
+async function markUnclearLifts(lifts) { // lifts from OpenSkiMap carry their OSM way id in slot 7
+  const ids = [...new Set(lifts.map(l => l[7]).filter(Boolean))];
+  if (ids.length) { const tags = await osmWayTags(ids); for (const l of lifts) l[6] = liftUnclear(tags.get(l[7])) ? 'u' : ''; }
+  for (const l of lifts) l.length = 7;
+}
 async function loadFeatures(area) {
   const cached = LS.get('sa:' + area.id);
-  if (cached && cached.v === 6 && cached.runs?.length && !cached.partial) return cached;
+  if (cached && cached.v === 7 && cached.runs?.length && !cached.partial) return cached;
   // 1) bounding box from the viewport hint
   const c = area.vh?.center || area.center;
   const R = area.vh ? Math.max(3000, Math.hypot(area.vh.rotatedWidthMeters, area.vh.rotatedHeightMeters) / 2 * 1.25) : 8000;
@@ -225,9 +247,11 @@ async function loadFeatures(area) {
     const f = await fetch(`${API}/features/openskimap/${id}.geojson`).then(r => r.json());
     if (f.geometry?.type !== 'LineString') return null;
     const p = f.properties;
-    return ['l', p.name || '', p.ref || '', p.liftType || '', p.capacity || '', f.geometry.coordinates.map(q => [+q[0].toFixed(6), +q[1].toFixed(6)])];
+    const osm = (p.sources || []).find(q => q.type === 'openstreetmap' && /^way\/\d+$/.test(q.id));
+    return ['l', p.name || '', p.ref || '', p.liftType || '', p.capacity || '', f.geometry.coordinates.map(q => [+q[0].toFixed(6), +q[1].toFixed(6)]), '', osm ? +osm.id.slice(4) : 0];
   }, (d, n) => progress(`Lifte laden … ${d}/${n}`, 0.35 + d / n * 0.25))).filter(Boolean);
-  let data = { v: 6, runs, lifts, src: 'OpenSkiMap' };
+  try { progress('Liftstatus prüfen …', 0.61); await markUnclearLifts(lifts); } catch (e) { console.warn('lift status check failed', e); for (const l of lifts) l.length = 7; }
+  let data = { v: 7, runs, lifts, src: 'OpenSkiMap' };
   // completeness check against the official OpenSkiMap statistics
   const tileKm = runs.reduce((a, r) => a + lineKm(r[5]), 0);
   if (!runs.length || (area.km && tileKm < area.km * 0.8)) {
@@ -235,7 +259,7 @@ async function loadFeatures(area) {
       const bb = { w: c[0] - dLon, e: c[0] + dLon, s: c[1] - dLat, n: c[1] + dLat };
       const ov = await loadOverpass(bb);
       const ovKm = ov.runs.reduce((a, r) => a + lineKm(r[5]), 0);
-      if (ovKm > tileKm) data = { v: 6, runs: ov.runs, lifts: ov.lifts, src: 'OpenStreetMap (Overpass)' };
+      if (ovKm > tileKm) data = { v: 7, runs: ov.runs, lifts: ov.lifts, src: 'OpenStreetMap (Overpass)' };
     } catch (e) { console.warn('Overpass fallback failed', e); data.partial = true; }
   }
   if (data.partial && !data.runs.length) throw new Error('BUSY');
@@ -496,6 +520,7 @@ async function start(area) {
     if (rec && rec.v === 7) {
       progress('Gespeicherte Karte öffnen …', 0.6);
       ({ data, M, H, F, tex, bbox } = rec);
+      if (data.v !== 7 && navigator.onLine !== false) setTimeout(() => loadFeatures(area).then(nd => { if (nd && !nd.partial && nd.runs.length) { rec.data = nd; IDB.put(rec); } }).catch(() => { }), 8000);
     } else {
       data = await loadFeatures(area);
       if (!data.runs.length) throw new Error('Für dieses Skigebiet sind in OpenStreetMap keine Alpinpisten eingetragen.');

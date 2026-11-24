@@ -114,9 +114,9 @@ scene.add(new THREE.HemisphereLight(0xe8f1fb, 0x5a6672, 1.6));
 // ---------- data: runs & lifts ----------
 const FEATS = window.__FEATS;
 const runs = [], lifts = [];
-for (const [k, name, ref, cls, ex, ll] of FEATS) {
+for (const [k, name, ref, cls, ex, ll, st] of FEATS) {
   const xz = ll.map(([lo, la]) => toXZ(lo, la));
-  if (k === 'r') runs.push({ name, ref, cls, xz }); else lifts.push({ name, ref, cls, cap: ex, xz });
+  if (k === 'r') runs.push({ name, ref, cls, xz }); else lifts.push({ name, ref, cls, cap: ex, xz, unclear: st === 'u' });
 }
 function densify(xz, step) {
   const out = []; let d = 0;
@@ -209,7 +209,7 @@ function highlight(segs) {
 
 // ---------- lifts ----------
 const liftGroup = new THREE.Group(); scene.add(liftGroup);
-const cablePos = [];
+const cablePos = [], cablePosU = [];   // U: lifts whose status is unclear (drawn pale and dashed)
 const anim = [];
 const DRAG = new Set(['t-bar', 'j-bar', 'platter', 'rope_tow']);
 const pylonM4 = [], stationM4 = [], chairM4 = [], dragM4 = [];
@@ -239,7 +239,7 @@ for (const l of lifts) {
   l.gauge = aerial ? (l.cls === 'cable_car' ? 5.5 : l.cls === 'chair_lift' ? 3.2 : 3.6) : drag ? 1.8 : 0;
   if (!carpet) for (const side of (aerial || drag ? [-1, 1] : [0])) for (let i = 0; i < path.length - 1; i++) {
     const a = path[i], b = path[i + 1], L = Math.hypot(b.x - a.x, b.z - a.z) || 1, ox = (b.z - a.z) / L * l.gauge * side, oz = -(b.x - a.x) / L * l.gauge * side;
-    cablePos.push(a.x + ox, a.y, a.z + oz, b.x + ox, b.y, b.z + oz);
+    (l.unclear ? cablePosU : cablePos).push(a.x + ox, a.y, a.z + oz, b.x + ox, b.y, b.z + oz);
   }
   // pylons
   for (let k = 1; k < nodes.length - 1; k++) {
@@ -254,10 +254,14 @@ for (const l of lifts) {
     else if (aerial) { const sc = l.cls === 'cable_car' ? [26, 20, 34] : [22, 18, 32]; /* hall behind the cable end, so the cable (7.5 m) enters through the opening */ const L = Math.hypot(q.x - p.x, q.z - p.z) || 1, off = sc[2] * 0.42; _m.compose(_v.set(p.x - (q.x - p.x) / L * off, p.g - 2, p.z - (q.z - p.z) / L * off), _q, _s.set(...sc)); stationM4.push(_m.clone()); }
     else if (drag) { _m.compose(_v.set(p.x, p.g, p.z), _q, _s.set(1, 1, 1)); dragM4.push(_m.clone()); }                              // open bull wheel on a mast
   }
-  if (aerial || (drag && l.cls !== 'rope_tow')) anim.push(l);
+  if ((aerial || (drag && l.cls !== 'rope_tow')) && !l.unclear) anim.push(l);
 }
 const cableGeo = new LineSegmentsGeometry(); cableGeo.setPositions(cablePos);
 const cables = new LineSegments2(cableGeo, makeLineMat(1.8, { color: 0x2b2f36 })); cables.renderOrder = 3; liftGroup.add(cables);
+if (cablePosU.length) {
+  const g = new LineSegmentsGeometry(); g.setPositions(cablePosU); const m = makeLineMat(2.2, { color: 0x8f99a4 }); m.dashed = true; m.dashSize = 14; m.gapSize = 10;
+  const c = new LineSegments2(g, m); c.computeLineDistances(); c.renderOrder = 3; liftGroup.add(c);
+}
 // geometry helpers (unit-sized parts with vertex colours)
 function part(g, color, tx = 0, ty = 0, tz = 0) { if (g.attributes.uv) g.deleteAttribute('uv'); g.translate(tx, ty, tz); const c = new THREE.Color(color), n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g.index ? g.toNonIndexed() : g; }
 const objMat = new THREE.MeshLambertMaterial({ vertexColors: true });
@@ -496,7 +500,7 @@ function showLift(l) {
   const dh = Math.round(Math.abs(l.h1 - l.h0)), L = Math.hypot(l.len, l.h1 - l.h0);
   ui.prof.classList.add('hidden');
   ui.info.innerHTML = `<div class="ph"><span class="badge lift">${liftIcon(l.cls)}</span><div><div class="pt">${l.name || LIFT_DE[l.cls] || 'Lift'}</div><div class="ps">${LIFT_DE[l.cls] || l.cls}</div></div></div>
-    <div class="i-row"><span>Länge ~${fmtLen(L)}</span><span>Höhenunterschied ${dh} m</span><span>Tal ${Math.round(Math.min(l.h0, l.h1))} m · Berg ${Math.round(Math.max(l.h0, l.h1))} m</span>${l.cap ? `<span>Kapazität ${l.cap} P/h</span>` : ''}</div>`;
+    <div class="i-row"><span>Länge ~${fmtLen(L)}</span><span>Höhenunterschied ${dh} m</span><span>Tal ${Math.round(Math.min(l.h0, l.h1))} m · Berg ${Math.round(Math.max(l.h0, l.h1))} m</span>${l.cap ? `<span>Kapazität ${l.cap} P/h</span>` : ''}</div>${l.unclear ? `<div class="i-warn">⚠️ Status unklar: In OpenStreetMap ist dieser Lift gleichzeitig als stillgelegt oder im Bau eingetragen. Bitte vor Ort prüfen – Routen und Treffpunkte nutzen ihn nicht.</div>` : ''}`;
   ui.info.classList.remove('hidden'); render();
 }
 const liftIcon = c => c === 'chair_lift' ? '🪑' : (c === 'gondola' || c === 'mixed_lift') ? '🚡' : c === 'cable_car' ? '🚠' : '⛷';
@@ -625,8 +629,10 @@ lifts.forEach((l, li) => {
   l.bottom = addNode(a.x, a.z, ha); l.top = addNode(b.x, b.z, hb);
   nodeOwner[l.bottom] = nodeOwner[l.top] = 'l' + li;
   const t = l.len / (LIFT_SPEED[l.cls] || 3) + (LIFT_WAIT[l.cls] || 30);
-  addEdge(l.bottom, l.top, { kind: 'lift', id: li, d: l.len, t, up: true });
-  if (l.cls === 'gondola' || l.cls === 'cable_car') addEdge(l.top, l.bottom, { kind: 'lift', id: li, d: l.len, t, up: false, down: true });
+  if (!l.unclear) { // lifts with unclear status are never used for routes
+    addEdge(l.bottom, l.top, { kind: 'lift', id: li, d: l.len, t, up: true });
+    if (l.cls === 'gondola' || l.cls === 'cable_car') addEdge(l.top, l.bottom, { kind: 'lift', id: li, d: l.len, t, up: false, down: true });
+  }
   gridAdd(l.bottom); gridAdd(l.top);
   connect(l.bottom, 90, 15); connect(l.top, 90, 15);
 });
