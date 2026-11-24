@@ -209,6 +209,12 @@
   #pocket.hidden { display:none; } #pk-clock { font-size:20px; } #pk-big { font-size:54px; font-weight:800; color:#8a96a1; } #pk-sub { font-size:14px; text-align:center; padding:0 20px; } .pk-rec { font-size:12px; color:#7a2a2a; margin-top:16px; }
   #pk-hint { position:absolute; bottom:max(28px, env(safe-area-inset-bottom)); font-size:12px; color:#3b434a; transition:color .2s; } #pk-hint.blink { color:#c9d1d8; }
   nav button { padding-left:3px; padding-right:3px; }
+  .lg-sub { font-size:10px; font-weight:700; color:var(--mut); text-transform:uppercase; letter-spacing:.05em; margin-top:8px; }
+  #ly-busy { text-transform:none; letter-spacing:0; font-weight:600; color:var(--acc); }
+  .ly-grid { display:grid; grid-template-columns:1fr 1fr; gap:4px; } .ly-grid .tg { margin-top:4px; white-space:nowrap; }
+  .ly-grid .tg.on { background:var(--ink); color:#fff; border-color:var(--ink); } .tg.busy { opacity:.6; }
+  #ly-attr { font-size:9px; color:var(--mut); margin-top:5px; max-width:170px; line-height:1.3; }
+  #legend.col .lg-sub, #legend.col .ly-grid, #legend.col #ly-attr { display:none; }
   #wx { position:fixed; inset:0; background:rgba(11,26,42,.35); display:flex; align-items:flex-end; z-index:10; }
   #wx .sheet { width:100%; margin:10px; margin-bottom:max(12px, env(safe-area-inset-bottom)); padding:16px; border-radius:20px; position:relative; max-width:520px; margin-left:auto; margin-right:auto; }
   #wx h2 { margin:0 0 8px; font-size:17px; }
@@ -275,6 +281,13 @@
   </div>
   <button id="tg-huts" class="tg on">🍴 Hütten</button>
   <button id="tg-slope" class="tg">Gelände einfärben</button>
+  <div class="lg-sub">Karte <span id="ly-busy"></span></div>
+  <div class="ly-grid">
+    <button id="ly-roads" class="tg">🛣️ Straßen</button><button id="ly-paths" class="tg">🥾 Wege</button>
+    <button id="ly-places" class="tg">🏘️ Orte</button><button id="ly-water" class="tg">💧 Wasser</button>
+    <button id="ly-bld" class="tg">🏠 Gebäude</button>
+  </div>
+  <div id="ly-attr" class="hidden">© OpenFreeMap · © OpenMapTiles · Daten © OpenStreetMap</div>
 </div>
 
 <div id="info" class="glass hidden"></div>
@@ -348,7 +361,7 @@
     <h2>Was du hier siehst</h2>
     <p>Das Skigebiet auf echtem Gelände. <b>Pisten</b> zeigt die Schwierigkeit, <b>Steilheit</b> färbt jede Piste nach dem berechneten Gefälle. Tippe auf eine Piste für Profil und maximales Gefälle, auf einen Lift für die Eckdaten oder ins Gelände für die Hangneigung.</p>
     <p><b>Route</b> plant die schnellste Verbindung über Pisten und Lifte, <b>Treffpunkt</b> findet für mehrere Leute einen fairen Treffpunkt. Zeiten sind Schätzungen. Ob eine Gondel-Talfahrt erlaubt ist, bitte vor Ort prüfen.</p>
-    <p class="muted">Pisten &amp; Lifte: © OpenStreetMap-Mitwirkende (ODbL), aufbereitet von OpenSkiMap. Höhendaten: Terrain Tiles (Mapzen, AWS Open Data; Quellen u. a. SRTM, EU-DEM – Liste: github.com/tilezen/joerd). Hütten &amp; Restaurants: © OpenStreetMap-Mitwirkende (ODbL), Öffnungszeiten ohne Gewähr. Wetter: Open-Meteo.com (CC BY 4.0). Gefälle über 40 m gemittelt, kurze Steilstufen werden eher unterschätzt. Schätzwerte, keine offiziellen Pistenangaben. Lift-Animation beschleunigt und Kabinen vergrößert. <b id="src-note"></b></p>
+    <p class="muted">Pisten &amp; Lifte: © OpenStreetMap-Mitwirkende (ODbL), aufbereitet von OpenSkiMap. Höhendaten: Terrain Tiles (Mapzen, AWS Open Data; Quellen u. a. SRTM, EU-DEM – Liste: github.com/tilezen/joerd). Hütten &amp; Restaurants: © OpenStreetMap-Mitwirkende (ODbL), Öffnungszeiten ohne Gewähr. Wetter: Open-Meteo.com (CC BY 4.0). Straßen, Wege, Orte, Gipfel, Gewässer &amp; Gebäude: OpenFreeMap, © OpenMapTiles, Daten © OpenStreetMap-Mitwirkende (ODbL). Gefälle über 40 m gemittelt, kurze Steilstufen werden eher unterschätzt. Schätzwerte, keine offiziellen Pistenangaben. Lift-Animation beschleunigt und Kabinen vergrößert. <b id="src-note"></b></p>
     <button id="about-close">Verstanden</button>
   </div>
 </div>

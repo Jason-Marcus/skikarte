@@ -1016,17 +1016,17 @@ function occluded(p) { // is the terrain between camera and point p?
   return false;
 }
 function updateBadges(dist) {
-  const show = !nav.active && dist < 9000; badgeGroup.visible = show; if (!show) return;
+  const show = !nav.active; badgeGroup.visible = show; if (!show) return; const close = dist < 9000;
   const now = performance.now();
   if (now - badgeT < 160 && badgeCam.distanceTo(camera.position) < 1 && badgeTgt.distanceTo(controls.target) < 1) return;
   badgeT = now; badgeCam.copy(camera.position); badgeTgt.copy(controls.target);
   const W2 = window.innerWidth, H2 = window.innerHeight, unit = H2 / (2 * Math.tan(camera.fov * Math.PI / 360));
   const lim = Math.max(2500, dist * 1.7), cand = [];
   for (const sp of badgeGroup.children) {
-    sp.visible = false; if (sp.userData.hut && !showHuts) continue;
-    const d = camera.position.distanceTo(sp.position); if (d > lim) continue;
+    sp.visible = false; const U = sp.userData; if (U.hut && !showHuts) continue; if (U.osm && !layerOn[U.osm]) continue; if (!close && !U.far) continue;
+    const d = camera.position.distanceTo(sp.position); if (d > (U.far ? lim * 3 : lim)) continue;
     _bp.copy(sp.position).project(camera); if (_bp.z > 1 || Math.abs(_bp.x) > 1.1 || Math.abs(_bp.y) > 1.1) continue;
-    const k = THREE.MathUtils.clamp(2600 / d, 0.62, 1.12), hgt = (sp.userData.hut ? 0.027 : 0.034) * k;      // smaller when far away
+    const k = THREE.MathUtils.clamp(2600 / d, 0.62, 1.12), hgt = (U.hs ?? (U.hut ? 0.027 : 0.034)) * k;      // smaller when far away
     sp.scale.set(hgt * sp.userData.a, hgt, 1);
     const hp = hgt * unit, wp = hp * sp.userData.a, cx = (_bp.x + 1) / 2 * W2, cy = (1 - _bp.y) / 2 * H2;
     cand.push({ sp, d, r: [cx - wp / 2 - 3, cy - hp / 2 - 3, cx + wp / 2 + 3, cy + hp / 2 + 3], prio: sp.userData.prio - d * 50 });
@@ -1368,6 +1368,127 @@ $('tg-slope').onclick = () => { terrainSlope = !terrainSlope; mat.map = terrainS
 $('btn-reset').onclick = () => { resetView(); render(); };
 $('pr-close').onclick = () => { closePanels(); };
 updateUi();
+
+// ---------- MAP LAYERS: roads, paths, places & peaks, water, buildings (© OpenStreetMap via OpenFreeMap) ----------
+const LAYERS = ['roads', 'paths', 'places', 'water', 'bld'];
+var layerOn = {}; try { layerOn = JSON.parse(localStorage.getItem('layers') || '{}') || {}; } catch { }
+const lyr = {}; for (const k of LAYERS) { lyr[k] = new THREE.Group(); lyr[k].visible = false; scene.add(lyr[k]); }
+var osmData = null, osmBuilt = {}, osmBusy = false;
+function drapeSegs(list, want, off) { // lon/lat polylines → segments lying on the terrain
+  const pos = {};
+  for (const [c, ll] of list) {
+    if (!want(c)) continue;
+    const xz = ll.map(p => toXZ(p[0], p[1])); if (!xz.some(p => inside(p[0], p[1]))) continue;
+    const s = densify(xz, 20), arr = pos[c] || (pos[c] = []);
+    for (let i = 0; i < s.length - 1; i++) { const a = s[i], b = s[i + 1]; if (!inside(a.x, a.z) || !inside(b.x, b.z)) continue;
+      arr.push(a.x, meshHeight(a.x, a.z) + off, a.z, b.x, meshHeight(b.x, b.z) + off, b.z); }
+  }
+  return pos;
+}
+function addLines(group, pos, width, color, order, halo, dash) {
+  if (!pos || !pos.length) return;
+  if (halo) { const g = new LineSegmentsGeometry(); g.setPositions(pos); const h = new LineSegments2(g, makeLineMat(halo[0], { color: halo[1] })); h.material.depthWrite = false; h.renderOrder = order; group.add(h); }
+  const g = new LineSegmentsGeometry(); g.setPositions(pos); const m = makeLineMat(width, { color }); m.depthWrite = false;
+  if (dash) { m.dashed = true; m.dashSize = dash[0]; m.gapSize = dash[1]; m.dashScale = 1; }
+  const l = new LineSegments2(g, m); if (dash) l.computeLineDistances(); l.renderOrder = order + 0.05; group.add(l);
+}
+const ROAD_STYLE = [ // classes, fill width, fill colour, halo
+  [['motorway', 'trunk', 'primary', 'secondary'], 3.6, 0xf6c453, [5.8, 0x6b5a3a]],
+  [['tertiary', 'minor'], 2.6, 0xffffff, [4.4, 0x5f6b77]],
+  [['service'], 1.6, 0xffffff, [3, 0x7d8894]],
+];
+function buildRoads() {
+  const g = lyr.roads, pos = drapeSegs(osmData.roads, () => true, 2.5);
+  for (const [cls, w, col, halo] of ROAD_STYLE) { const p = []; for (const c of cls) if (pos[c]) p.push(...pos[c]); addLines(g, p, w, col, 0.6, halo); }
+  const rail = [...(pos.rail || []), ...(pos.transit || [])]; addLines(g, rail, 1.4, 0xffffff, 0.62, [3.4, 0x3f4a55], [14, 12]);
+}
+function buildPaths() {
+  const pos = drapeSegs(osmData.paths, () => true, 2);
+  addLines(lyr.paths, pos.track, 2.6, 0x7d5a36, 0.55, [4, 0xffffff], [16, 7]);
+  addLines(lyr.paths, pos.path, 2.1, 0x6b3f1d, 0.56, null, [9, 6]);
+}
+function buildWater() {
+  const pos = [];
+  for (const [, rings] of osmData.water) {
+    const R = rings.map(r => densify(r.map(p => toXZ(p[0], p[1])), 40).map(q => new THREE.Vector2(q.x, q.z)));
+    for (const r of R) if (r.length > 2 && r[0].equals(r[r.length - 1])) r.pop();
+    const outer = R[0], holes = R.slice(1).filter(h => h.length > 2); if (!outer || outer.length < 3) continue;
+    if (!outer.some(v => inside(v.x, v.y))) continue;
+    const all = outer.concat(...holes), faces = THREE.ShapeUtils.triangulateShape(outer, holes);
+    for (const f of faces) for (const i of f) { const v = all[i]; pos.push(v.x, (inside(v.x, v.y) ? meshHeight(v.x, v.y) : heightAt(v.x, v.y)) + 1.5, v.y); }
+  }
+  if (pos.length) {
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x86c0ea, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -8 })); m.renderOrder = 0.5; lyr.water.add(m);
+  }
+  const rv = drapeSegs(osmData.rivers, () => true, 2.2);
+  addLines(lyr.water, [...(rv.river || []), ...(rv.canal || [])], 3.2, 0x3b8ed8, 0.58);
+  addLines(lyr.water, rv.stream, 1.5, 0x4a9be0, 0.57);
+}
+function buildBuildings() {
+  const pos = [], col = [], wall = new THREE.Color(0xe6ddd0), roof = new THREE.Color(0xf4f7fa);
+  const push = (c, ...v) => { for (let i = 0; i < v.length; i += 3) { pos.push(v[i], v[i + 1], v[i + 2]); col.push(c.r, c.g, c.b); } };
+  for (const [hgt, ring] of osmData.bld || []) {
+    const pts = ring.map(p => toXZ(p[0], p[1])); if (pts.length < 3 || !pts.every(p => inside(p[0], p[1]))) continue;
+    let base = Infinity; for (const p of pts) base = Math.min(base, meshHeight(p[0], p[1])); base -= 1.5;
+    const top = base + 1.5 + hgt;
+    for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length];
+      push(wall, a[0], base, a[1], b[0], base, b[1], b[0], top, b[1], a[0], base, a[1], b[0], top, b[1], a[0], top, a[1]); }
+    const v2 = pts.map(p => new THREE.Vector2(p[0], p[1]));
+    for (const f of THREE.ShapeUtils.triangulateShape(v2, [])) push(roof, ...f.flatMap(i => [pts[i][0], top, pts[i][1]]));
+  }
+  if (!pos.length) return;
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.computeVertexNormals();
+  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide })); lyr.bld.add(m);
+}
+function textSprite(lines, fs, color, weight) {
+  const c = document.createElement('canvas'), ctx = c.getContext('2d'), F = (k, s) => `${k ? 500 : weight} ${s}px system-ui, sans-serif`;
+  const sizes = lines.map((_, k) => k ? Math.round(fs * 0.72) : fs);
+  let w = 0; lines.forEach((l, k) => { ctx.font = F(k, sizes[k]); w = Math.max(w, ctx.measureText(l).width); });
+  c.width = Math.ceil(w + fs * 0.7); c.height = Math.ceil(sizes.reduce((a, s) => a + s * 1.2, 0) + fs * 0.35);
+  let y = fs * 0.18; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  lines.forEach((l, k) => { const s = sizes[k]; y += s * 0.6; ctx.font = F(k, s); ctx.lineWidth = s * 0.3; ctx.strokeStyle = 'rgba(255,255,255,.96)'; ctx.strokeText(l, c.width / 2, y); ctx.fillStyle = color; ctx.fillText(l, c.width / 2, y); y += s * 0.6; });
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, sizeAttenuation: false, depthWrite: false, depthTest: false, transparent: true }));
+  sp.renderOrder = 9; sp.userData.a = c.width / c.height; return sp;
+}
+function buildPlaces() {
+  const P = { city: [50, 0.04, 6e6, true], town: [48, 0.038, 6e6, true], village: [42, 0.032, 4e6, true], hamlet: [34, 0.024, 4e5, false] };
+  for (const [cls, name, lon, lat] of osmData.places) {
+    const [x, z] = toXZ(lon, lat); if (!inside(x, z)) continue; const st = P[cls];
+    const sp = textSprite([name], st[0], cls === 'hamlet' ? '#4a5866' : '#0b1a2a', cls === 'hamlet' ? 600 : 800);
+    sp.position.set(x, meshHeight(x, z) + 35, z); Object.assign(sp.userData, { osm: 'places', hs: st[1], prio: st[2], far: st[3] }); badgeGroup.add(sp);
+  }
+  for (const [name, ele, lon, lat] of osmData.peaks) {
+    const [x, z] = toXZ(lon, lat); if (!inside(x, z)) continue;
+    const sp = textSprite(['▲ ' + name, ele ? ele.toLocaleString('de-DE') + ' m' : ''].filter(Boolean), 34, '#4b3621', 700);
+    sp.position.set(x, heightAt(x, z) + 25, z); Object.assign(sp.userData, { osm: 'places', hs: ele ? 0.036 : 0.024, prio: 1e6 + ele, far: true }); badgeGroup.add(sp);
+  }
+}
+const BUILD = { roads: buildRoads, paths: buildPaths, water: buildWater, places: buildPlaces, bld: buildBuildings };
+function layerUi() {
+  for (const k of LAYERS) { const b = $('ly-' + k); b.classList.toggle('on', !!layerOn[k]); b.classList.toggle('busy', osmBusy && layerOn[k] && !osmBuilt[k]); }
+  $('ly-attr').classList.toggle('hidden', !LAYERS.some(k => layerOn[k]));
+}
+async function applyLayers() {
+  const want = LAYERS.filter(k => layerOn[k]);
+  if (want.length && (!osmData || (layerOn.bld && !osmData.bld))) {
+    if (osmBusy) return; osmBusy = true; layerUi();
+    try { osmData = await window.__osm(!!layerOn.bld, (d, n) => { const b = $('ly-busy'); b.textContent = `Karte laden … ${d}/${n}`; }); }
+    catch (e) { window.__toast && window.__toast(navigator.onLine === false ? 'Für Orte & Wege braucht die App beim ersten Mal Internet.' : 'Kartendaten (OpenFreeMap) gerade nicht erreichbar – später nochmal versuchen.'); for (const k of want) if (!osmBuilt[k]) layerOn[k] = false; }
+    osmBusy = false; $('ly-busy').textContent = '';
+    if (osmData?.partial) window.__toast && window.__toast('Einige Kartenkacheln fehlen – die Ebenen sind evtl. lückenhaft.');
+  }
+  for (const k of LAYERS) {
+    if (layerOn[k] && !osmBuilt[k] && osmData && (k !== 'bld' || osmData.bld)) { BUILD[k](); osmBuilt[k] = true; resize(); }
+    lyr[k].visible = !!layerOn[k];
+  }
+  try { localStorage.setItem('layers', JSON.stringify(layerOn)); } catch { }
+  layerUi(); badgeT = 0; render();
+}
+for (const k of LAYERS) $('ly-' + k).onclick = () => { layerOn[k] = !layerOn[k]; applyLayers(); };
+if (LAYERS.some(k => layerOn[k])) setTimeout(applyLayers, 1500);
+layerUi();
 
 // ---------- TAGES-TRACKER ----------
 // Records GPS fixes of a ski day and turns them into stats: runs, lift rides, vertical, top speed, pistes, pauses.
@@ -1864,6 +1985,6 @@ function loop() {
 loop();
 
 window.__hAt = heightAt;
-window.__app = { liftGeo, projLift, trk, sim, analyzeTrack, startTracking, stopTracking, showTrack, applySharedMeet, meetLink, xzToLonLat, setHuts, huts, showHut, nav, gps, startNav, stopNav, focusStep, camera, controls, runs, lifts, showRun, showLift, setMode, G, route, computeRoute, setRouting, buildSteps, meet, computeMeet, setTab, fairMeet, placeName };
+window.__app = { lyr, layerOn, applyLayers, liftGeo, projLift, trk, sim, analyzeTrack, startTracking, stopTracking, showTrack, applySharedMeet, meetLink, xzToLonLat, setHuts, huts, showHut, nav, gps, startNav, stopNav, focusStep, camera, controls, runs, lifts, showRun, showLift, setMode, G, route, computeRoute, setRouting, buildSteps, meet, computeMeet, setTab, fairMeet, placeName };
 
 }

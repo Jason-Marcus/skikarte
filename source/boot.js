@@ -334,6 +334,97 @@ function makeTextures(M, H, F) {
   return Promise.all([toBlob(base), toBlob(slope)]).then(([b1, b2]) => ({ base: b1, slope: b2 }));
 }
 
+// ---------------- map layers: roads, paths, water, places, buildings (OpenFreeMap, OpenMapTiles schema) ----------------
+const OFM = 'https://tiles.openfreemap.org/planet';
+let ofmBase = null;
+async function ofmTiles() { if (ofmBase) return ofmBase; const tj = await fetch(OFM).then(r => { if (!r.ok) throw new Error('tilejson ' + r.status); return r.json(); }); ofmBase = tj.tiles[0]; return ofmBase; }
+const OSM_ROAD = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor', 'service', 'rail', 'transit']);
+const OSM_PATH = new Set(['path', 'track']);
+const ringArea = r => { let a = 0; for (let i = 0; i < r.length - 1; i++) a += r[i][0] * r[i + 1][1] - r[i + 1][0] * r[i][1]; return a / 2; };
+function clipPoly(ring, E) { // Sutherland–Hodgman against the tile square (drops the tile buffer → no duplicates)
+  let out = ring;
+  for (const [ax, lo] of [[0, true], [0, false], [1, true], [1, false]]) {
+    const inp = out; out = []; if (!inp.length) break;
+    const lim = lo ? 0 : E, ins = p => lo ? p[ax] >= 0 : p[ax] <= E;
+    for (let i = 0; i < inp.length; i++) {
+      const P = inp[i], Q = inp[(i + 1) % inp.length], a = ins(P), b = ins(Q);
+      if (a) out.push(P);
+      if (a !== b) { const t = (lim - P[ax]) / (Q[ax] - P[ax]); out.push([P[0] + (Q[0] - P[0]) * t, P[1] + (Q[1] - P[1]) * t]); }
+    }
+  }
+  return out;
+}
+function polysOf(f) { // MVT rings → [[outer, ...holes], ...], clipped to the tile
+  const polys = [];
+  for (const ring of f.lines) {
+    const r = ring.slice(0, -1); if (r.length < 3) continue;
+    const a = ringArea(ring), c = clipPoly(r, f.extent); if (c.length < 3) continue;
+    if (a > 0) polys.push([c]); else if (polys.length) polys[polys.length - 1].push(c);
+  }
+  return polys;
+}
+async function ofmTile(base, z, x, y) {
+  for (let k = 0; k < 2; k++) {
+    try { const r = await fetch(base.replace('{z}', z).replace('{x}', x).replace('{y}', y)); if (r.ok) return decodeTile(await r.arrayBuffer()); if (r.status === 404) return {}; } catch (e) { }
+    await new Promise(r => setTimeout(r, 800));
+  }
+  throw new Error('tile');
+}
+function tilesFor(bb, Z) { const a = [], x0 = Math.floor(lon2x(bb.w, Z)), x1 = Math.floor(lon2x(bb.e, Z)), y0 = Math.floor(lat2y(bb.n, Z)), y1 = Math.floor(lat2y(bb.s, Z)); for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) a.push([x, y]); return a; }
+async function loadOsm(bb, onStep) {
+  const base = await ofmTiles(), out = { v: 1, roads: [], paths: [], water: [], rivers: [], places: [], peaks: [], settled: [] };
+  const inB = p => p[0] >= bb.w && p[0] <= bb.e && p[1] >= bb.s && p[1] <= bb.n;
+  const seen = new Set(); let fails = 0;
+  const tiles = tilesFor(bb, 13);
+  await pool(tiles, 6, async ([tx, ty]) => {
+    let t; try { t = await ofmTile(base, 13, tx, ty); } catch (e) { fails++; return; }
+    const ll = (p, E) => [+x2lon(tx + p[0] / E, 13).toFixed(6), +y2lat(ty + p[1] / E, 13).toFixed(6)];
+    let town = 0;
+    for (const f of t.transportation || []) {
+      if (f.type !== 2 || f.props.brunnel === 'tunnel') continue;
+      const c = f.props.class, tgt = OSM_ROAD.has(c) ? out.roads : OSM_PATH.has(c) ? out.paths : null; if (!tgt) continue;
+      if (c === 'minor' || c === 'service') town++;
+      for (const ln of f.lines) for (const cl of clipLine(ln, f.extent)) tgt.push([c, cl.map(p => ll(p, f.extent))]);
+    }
+    for (const f of t.waterway || []) {
+      if (f.type !== 2 || f.props.brunnel === 'tunnel' || !['river', 'stream', 'canal'].includes(f.props.class)) continue;
+      for (const ln of f.lines) for (const cl of clipLine(ln, f.extent)) out.rivers.push([f.props.class, cl.map(p => ll(p, f.extent))]);
+    }
+    for (const f of t.water || []) {
+      if (f.type !== 3 || f.props.class === 'swimming_pool' || f.props.brunnel === 'tunnel') continue;
+      for (const poly of polysOf(f)) out.water.push([f.props.class, poly.map(r => r.map(p => ll(p, f.extent)))]);
+    }
+    const pointIn = (f, fn) => { for (const ln of f.lines) { const p = ln[0]; if (p[0] < 0 || p[1] < 0 || p[0] >= f.extent || p[1] >= f.extent) continue; const q = ll(p, f.extent); if (inB(q)) fn(q); } };
+    for (const f of t.place || []) {
+      const c = f.props.class, name = f.props['name:de'] || f.props.name; if (f.type !== 1 || !name || !['city', 'town', 'village', 'hamlet'].includes(c)) continue;
+      pointIn(f, q => { const k = 'p' + name + q; if (seen.has(k)) return; seen.add(k); out.places.push([c, name, q[0], q[1]]); town += 3; });
+    }
+    for (const f of t.mountain_peak || []) {
+      const name = f.props['name:de'] || f.props.name; if (f.type !== 1 || !name || !['peak', 'volcano'].includes(f.props.class)) continue;
+      pointIn(f, q => { const k = 'k' + name + q; if (seen.has(k)) return; seen.add(k); out.peaks.push([name, f.props.ele || 0, q[0], q[1]]); });
+    }
+    if (town >= 6) out.settled.push([tx, ty]);
+  }, onStep);
+  if (fails === tiles.length) throw new Error('offline');
+  if (fails) out.partial = true;
+  return out;
+}
+async function loadBuildings(osm, bb, onStep) {
+  const base = await ofmTiles(), bld = [], kids = [];
+  for (const [tx, ty] of osm.settled) for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) kids.push([tx * 2 + dx, ty * 2 + dy]);
+  let fails = 0;
+  await pool(kids, 6, async ([tx, ty]) => {
+    let t; try { t = await ofmTile(base, 14, tx, ty); } catch (e) { fails++; return; }
+    for (const f of t.building || []) {
+      if (f.type !== 3 || f.props.hide_3d) continue;
+      const h = Math.max(3, Math.min(60, (f.props.render_height || 7) - (f.props.render_min_height || 0)));
+      for (const poly of polysOf(f)) bld.push([Math.round(h), poly[0].map(p => [+x2lon(tx + p[0] / f.extent, 14).toFixed(6), +y2lat(ty + p[1] / f.extent, 14).toFixed(6)])]);
+    }
+  }, onStep);
+  if (kids.length && fails === kids.length) throw new Error('offline');
+  return bld;
+}
+
 // ---------------- offline store (IndexedDB) ----------------
 const IDB = {
   db: null,
@@ -429,6 +520,15 @@ async function start(area) {
     window.__VIEW = { lon: (bbox.fw + bbox.fe) / 2, lat: (bbox.fs + bbox.fn) / 2, size: Math.max((bbox.fe - bbox.fw) * M.mlon, (bbox.fn - bbox.fs) * M.mlat) };
     progress('Fertig', 1);
     window.__AREA = area;
+    // map layers (loaded on first use, then stored with the area)
+    let osmData = rec?.osm?.v === 1 ? rec.osm : null;
+    window.__osm = async (needBld, onStep) => {
+      let changed = false;
+      if (!osmData) { osmData = await loadOsm(bbox, onStep); changed = !osmData.partial; }
+      if (needBld && !osmData.bld) { osmData.bld = await loadBuildings(osmData, bbox, onStep); changed = !osmData.partial; }
+      if (changed) { const r2 = await IDB.get(area.id); if (r2) { r2.osm = osmData; IDB.put(r2); } }
+      return osmData;
+    };
     runApp();
     $('loading').classList.add('hidden');
     if (window.__SHARE) { const sh = window.__SHARE; window.__SHARE = null; setTimeout(() => window.__app.applySharedMeet(sh), 300); }
