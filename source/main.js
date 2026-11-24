@@ -149,15 +149,18 @@ for (const r of runs) {
 const lineMats = [];
 function makeLineMat(width, opts = {}) { const m = new LineMaterial({ linewidth: width, vertexColors: !opts.color, color: opts.color ?? 0xffffff, transparent: !!opts.opacity, opacity: opts.opacity ?? 1, depthTest: opts.depthTest ?? true }); lineMats.push(m); return m; }
 const runPos = [], runIdx = [];
-runs.forEach((r, ri) => { for (let i = 0; i < r.s.length - 1; i++) { const a = r.s[i], b = r.s[i + 1];
+// fixed drawing order (easy → difficult): overlapping pistes no longer fight for depth (no flicker), the harder one stays on top
+const DIFF_RANK = { novice: 0, easy: 1, '': 1.5, freeride: 2, intermediate: 2, advanced: 3, expert: 4 };
+const runOrder = runs.map((r, ri) => ri).sort((a, b) => (DIFF_RANK[runs[a].cls] ?? 1.5) - (DIFF_RANK[runs[b].cls] ?? 1.5));
+runOrder.forEach(ri => { const r = runs[ri]; for (let i = 0; i < r.s.length - 1; i++) { const a = r.s[i], b = r.s[i + 1];
   runPos.push(a.x, meshHeight(a.x, a.z) + 4, a.z, b.x, meshHeight(b.x, b.z) + 4, b.z); runIdx.push([ri, i]); } });
 const runGeo = new LineSegmentsGeometry(); runGeo.setPositions(runPos);
 const runLines = new LineSegments2(runGeo, makeLineMat(2.6));
-runLines.renderOrder = 2;
+runLines.renderOrder = 2; runLines.material.depthWrite = false;
 // groomed piste bands: white centre, difficulty-coloured edges, draped on the terrain
 const RIB_W = 15, RIB_EDGE = 3.2;
-const ribPos = [], ribIdx = [], ribOwner = [];
-runs.forEach((r, ri) => {
+const ribPos = [], ribIdx = [], ribCentre = [], ribOwner = [];
+runOrder.forEach(ri => { const r = runs[ri];
   const s0 = r.s; if (s0.length < 2) return;
   const base = ribPos.length / 3;
   for (let i = 0; i < s0.length; i++) {
@@ -166,13 +169,15 @@ runs.forEach((r, ri) => {
     const nx = -dz, nz = dx;
     for (const o of [-RIB_W, -RIB_W + RIB_EDGE, RIB_W - RIB_EDGE, RIB_W]) { const x = s0[i].x + nx * o, z = s0[i].z + nz * o; ribPos.push(x, meshHeight(x, z) + 1.6, z); ribOwner.push(ri, i); }
   }
-  for (let i = 0; i < s0.length - 1; i++) for (let c = 0; c < 3; c++) { const a = base + i * 4 + c, b = a + 1, d = a + 4, e = d + 1; ribIdx.push(a, d, b, b, d, e); }
+  for (let i = 0; i < s0.length - 1; i++) for (let c = 0; c < 3; c++) { const a = base + i * 4 + c, b = a + 1, d = a + 4, e = d + 1; (c === 1 ? ribCentre : ribIdx).push(a, d, b, b, d, e); }
 });
+// all coloured edges first, then all white groomed centres: where pistes meet they merge into one white surface
+for (const v of ribCentre) ribIdx.push(v);
 const ribGeo = new THREE.BufferGeometry();
 ribGeo.setAttribute('position', new THREE.Float32BufferAttribute(ribPos, 3));
 ribGeo.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(ribPos.length), 3));
 ribGeo.setIndex(ribIdx);
-const ribMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -6 });
+const ribMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -6, depthWrite: false });   // drawn in index order → no z-fighting between bands
 const ribbons = new THREE.Mesh(ribGeo, ribMat); ribbons.renderOrder = 1;
 scene.add(ribbons, runLines);
 var mode = 'pisten';
