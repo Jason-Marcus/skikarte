@@ -522,10 +522,11 @@ async function start(area) {
     window.__AREA = area;
     // map layers (loaded on first use, then stored with the area)
     let osmData = rec?.osm?.v === 2 ? rec.osm : null;
+    let osmP = null, bldP = null;   // in-flight downloads are shared
     window.__osm = async (needBld, onStep) => {
       let changed = false;
-      if (!osmData) { osmData = await loadOsm(bbox, onStep); changed = !osmData.partial; }
-      if (needBld && !osmData.bld) { osmData.bld = await loadBuildings(osmData, bbox, onStep); changed = !osmData.partial; }
+      if (!osmData) { try { osmData = await (osmP ||= loadOsm(bbox, onStep)); } finally { osmP = null; } changed = !osmData.partial; }
+      if (needBld && !osmData.bld) { try { osmData.bld = await (bldP ||= loadBuildings(osmData, bbox, onStep)); } finally { bldP = null; } changed = !osmData.partial; }
       if (changed) { const r2 = await IDB.get(area.id); if (r2) { r2.osm = osmData; IDB.put(r2); } }
       return osmData;
     };

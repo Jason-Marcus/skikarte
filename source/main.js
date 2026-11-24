@@ -212,7 +212,7 @@ const liftGroup = new THREE.Group(); scene.add(liftGroup);
 const cablePos = [];
 const anim = [];
 const DRAG = new Set(['t-bar', 'j-bar', 'platter', 'rope_tow']);
-const pylonM4 = [], stationM4 = [], hutM4 = [];
+const pylonM4 = [], stationM4 = [], chairM4 = [], dragM4 = [];
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _s = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
 for (const l of lifts) {
   const aerial = AERIAL.has(l.cls), drag = DRAG.has(l.cls), carpet = l.cls === 'magic_carpet';
@@ -225,7 +225,7 @@ for (const l of lifts) {
     const mid = []; for (let k = 1; k <= n; k++) { const t = k / (n + 1), x = A.x + (B.x - A.x) * t, z = A.z + (B.z - A.z) * t; mid.push({ x, z, g: meshHeight(x, z), end: false }); }
     nodes = [A, ...mid, B];
   }
-  for (const nd of nodes) nd.y = nd.g + (nd.end ? (aerial ? 9 : drag ? 5 : 0.8) : clear);
+  for (const nd of nodes) nd.y = nd.g + (nd.end ? (aerial ? (l.cls === 'chair_lift' ? 9 : 7.5) : drag ? 5 : 0.8) : clear);
   const path = []; let d = 0;
   for (let k = 0; k < nodes.length - 1; k++) {
     const a = nodes[k], b = nodes[k + 1], L = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.ceil(L / 25));
@@ -250,25 +250,68 @@ for (const l of lifts) {
   const A = nodes[0], B = nodes[1], Z = nodes[nodes.length - 1], Y = nodes[nodes.length - 2];
   for (const [p, q] of [[A, B], [Z, Y]]) {
     const ang = Math.atan2(q.x - p.x, q.z - p.z); _q.setFromAxisAngle(_up, ang);
-    if (aerial) { const sc = l.cls === 'chair_lift' ? [16, 9, 26] : l.cls === 'cable_car' ? [26, 16, 34] : [22, 12, 32]; _m.compose(_v.set(p.x, p.g - 2, p.z), _q, _s.set(...sc)); stationM4.push(_m.clone()); }
-    else if (!carpet) { _m.compose(_v.set(p.x, p.g - 1, p.z), _q, _s.set(5, 4, 6)); hutM4.push(_m.clone()); }
+    if (l.cls === 'chair_lift') { _m.compose(_v.set(p.x, p.g, p.z), _q, _s.set(1, 1, 1)); chairM4.push(_m.clone()); }            // bull wheel under a half-round hood
+    else if (aerial) { const sc = l.cls === 'cable_car' ? [26, 20, 34] : [22, 18, 32]; /* hall behind the cable end, so the cable (7.5 m) enters through the opening */ const L = Math.hypot(q.x - p.x, q.z - p.z) || 1, off = sc[2] * 0.42; _m.compose(_v.set(p.x - (q.x - p.x) / L * off, p.g - 2, p.z - (q.z - p.z) / L * off), _q, _s.set(...sc)); stationM4.push(_m.clone()); }
+    else if (drag) { _m.compose(_v.set(p.x, p.g, p.z), _q, _s.set(1, 1, 1)); dragM4.push(_m.clone()); }                              // open bull wheel on a mast
   }
   if (aerial || (drag && l.cls !== 'rope_tow')) anim.push(l);
 }
 const cableGeo = new LineSegmentsGeometry(); cableGeo.setPositions(cablePos);
 const cables = new LineSegments2(cableGeo, makeLineMat(1.8, { color: 0x2b2f36 })); cables.renderOrder = 3; liftGroup.add(cables);
 // geometry helpers (unit-sized parts with vertex colours)
-function part(g, color, tx = 0, ty = 0, tz = 0) { g.translate(tx, ty, tz); const c = new THREE.Color(color), n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g.index ? g.toNonIndexed() : g; }
+function part(g, color, tx = 0, ty = 0, tz = 0) { if (g.attributes.uv) g.deleteAttribute('uv'); g.translate(tx, ty, tz); const c = new THREE.Color(color), n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g.index ? g.toNonIndexed() : g; }
 const objMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 function instanced(geo, list) { if (!list.length) return null; const im = new THREE.InstancedMesh(geo, objMat, list.length); list.forEach((m, i) => im.setMatrixAt(i, m)); im.computeBoundingSphere(); liftGroup.add(im); return im; }
 // pylon: lattice-like mast (scaled to height) + cross arm
 const pylonGeo = mergeGeometries([part(new THREE.BoxGeometry(1.6, 1, 1.6), 0x8b96a3, 0, 0.5, 0), part(new THREE.BoxGeometry(9, 0.05, 0.6), 0x6d7884, 0, 0.985, 0), part(new THREE.BoxGeometry(0.5, 0.06, 0.5), 0x4a525c, -3.8, 0.96, 0), part(new THREE.BoxGeometry(0.5, 0.06, 0.5), 0x4a525c, 3.8, 0.96, 0)]);
 instanced(pylonGeo, pylonM4);
-// station: building with gabled roof (unit size, scaled per type)
-const roof = new THREE.CylinderGeometry(0.62, 0.62, 1.04, 3, 1); roof.rotateZ(Math.PI / 2); roof.rotateY(Math.PI / 2); roof.scale(1, 0.55, 1);
-const stationGeo = mergeGeometries([part(new THREE.BoxGeometry(1, 0.7, 1), 0xdfe3e8, 0, 0.35, 0), part(new THREE.BoxGeometry(1.02, 0.18, 0.12), 0x34414f, 0, 0.45, 0.5), part(roof, 0x9c3b2e, 0, 0.82, 0)]);
+// gable roof with the ridge along z, apex up (w across, d along the ridge, h high)
+function gable(w, d, h) {
+  const a = [-w / 2, 0, -d / 2], b = [w / 2, 0, -d / 2], c = [w / 2, 0, d / 2], e = [-w / 2, 0, d / 2], r1 = [0, h, -d / 2], r2 = [0, h, d / 2];
+  const tris = [[a, e, r2], [a, r2, r1], [b, r1, r2], [b, r2, c], [a, r1, b], [e, c, r2], [a, b, c], [a, c, e]], v = [];
+  for (const T of tris) { // wind every face outwards
+    const [p, q, s] = T, n = new THREE.Vector3().crossVectors(new THREE.Vector3(q[0] - p[0], q[1] - p[1], q[2] - p[2]), new THREE.Vector3(s[0] - p[0], s[1] - p[1], s[2] - p[2]));
+    const ctr = new THREE.Vector3((p[0] + q[0] + s[0]) / 3, (p[1] + q[1] + s[1]) / 3 - h / 3, (p[2] + q[2] + s[2]) / 3);
+    for (const P of (n.dot(ctr) < 0 ? [p, s, q] : [p, q, s])) v.push(...P);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); g.computeVertexNormals(); return g;
+}
+// gondola / cable car station: hall with a low gable roof along the lift, dark opening towards the line (unit size, scaled per type)
+const stationGeo = mergeGeometries([
+  part(new THREE.BoxGeometry(1, 0.62, 1), 0xdfe3e8, 0, 0.31, 0),
+  part(new THREE.BoxGeometry(1.004, 0.12, 0.6), 0x5f7a92, 0, 0.47, 0.05),         // glass band
+  part(new THREE.BoxGeometry(0.5, 0.5, 0.02), 0x26313c, 0, 0.36, 0.5),            // opening for the cabins
+  part(gable(1.1, 1.08, 0.2), 0x6f7a85, 0, 0.62, 0),
+  part(gable(1.06, 1.1, 0.19), 0xf4f7fa, 0, 0.63, 0),                               // snow on the roof
+]);
 instanced(stationGeo, stationM4);
-instanced(mergeGeometries([part(new THREE.BoxGeometry(1, 0.8, 1), 0xc9a27a, 0, 0.4, 0), part(roof.clone(), 0x6b4a36, 0, 0.95, 0)]), hutM4);
+// chairlift station: column, horizontal bull wheel at cable height (9 m, Ø 6.4 m), half-round hood over it
+{
+  const wheel = new THREE.TorusGeometry(3.2, 0.28, 6, 28); wheel.rotateX(Math.PI / 2);
+  const hood = new THREE.CylinderGeometry(4.4, 4.4, 13, 20, 1, false, Math.PI / 2, Math.PI); hood.rotateX(Math.PI / 2);
+  const hoodSnow = new THREE.CylinderGeometry(4.5, 4.5, 12.6, 20, 1, true, Math.PI * 0.72, Math.PI * 0.56); hoodSnow.rotateX(Math.PI / 2);
+  instanced(mergeGeometries([
+    part(new THREE.BoxGeometry(1.6, 9.6, 1.6), 0x8b96a3, 0, 4.8, -1.5),
+    part(new THREE.BoxGeometry(6.8, 0.3, 0.4), 0x5d6773, 0, 9, 0),                   // spokes
+    part(new THREE.BoxGeometry(0.4, 0.3, 6.8), 0x5d6773, 0, 9, 0),
+    part(wheel, 0x3d4650, 0, 9, 0),
+    part(hood, 0x2f6fb5, 0, 9.6, -1.2),
+    part(hoodSnow, 0xf4f7fa, 0, 9.6, -1.2),
+    part(new THREE.BoxGeometry(3, 2.8, 3), 0xdfe3e8, 4.6, 1.4, -4),                  // small operator cabin
+    part(gable(3.4, 3.4, 0.9), 0xf4f7fa, 4.6, 2.8, -4),
+  ]), chairM4);
+}
+// drag lift station: bull wheel (Ø 3.6 m) on a mast at cable height 5 m, no building
+{
+  const wheel = new THREE.TorusGeometry(1.8, 0.16, 6, 22); wheel.rotateX(Math.PI / 2);
+  instanced(mergeGeometries([
+    part(new THREE.BoxGeometry(0.5, 5.4, 0.5), 0x8b96a3, 0, 2.7, 0),
+    part(new THREE.BoxGeometry(0.9, 0.7, 0.9), 0x5d6773, 0, 5.5, 0),                   // drive / bearing
+    part(new THREE.BoxGeometry(3.8, 0.14, 0.2), 0x5d6773, 0, 5, 0),
+    part(new THREE.BoxGeometry(0.2, 0.14, 3.8), 0x5d6773, 0, 5, 0),
+    part(wheel, 0xf2a33a, 0, 5, 0),
+  ]), dragM4);
+}
 // cabins per lift type (unit size ≈ 1 m, scaled with zoom)
 const CAB = {
   gondola: { sp: 6, gap: 110, geo: mergeGeometries([part(new THREE.BoxGeometry(2.0, 2.0, 2.2), 0xd8322b, 0, -2.6, 0), part(new THREE.BoxGeometry(2.05, 0.7, 2.25), 0x23303d, 0, -2.2, 0), part(new THREE.BoxGeometry(1.4, 0.25, 1.4), 0x9aa4ae, 0, -1.45, 0), part(new THREE.BoxGeometry(0.15, 1.4, 0.15), 0x4a525c, 0, -0.7, 0)]) },
@@ -1306,8 +1349,17 @@ function setHuts(list) {
     badgeGroup.add(sp);
   }
   if (m4.length) {
-    const roof = new THREE.CylinderGeometry(0.62, 0.62, 1.06, 3, 1); roof.rotateZ(Math.PI / 2); roof.rotateY(Math.PI / 2); roof.scale(1, 0.5, 1);
-    const geo = mergeGeometries([part(new THREE.BoxGeometry(14, 6, 10), 0x8a5a36, 0, 3, 0), part(new THREE.BoxGeometry(14.2, 2.2, 10.2), 0xe9e2d6, 0, 1.1, 0), part(roof.scale(15, 7, 11.5), 0xf4f7fa, 0, 8.3, 0), part(new THREE.BoxGeometry(1.2, 3, 1.2), 0x5a3c26, 4, 11, 2)]);
+    // alpine chalet: plastered base, wooden upper floor, window band, gable roof with overhang and snow, chimney
+    const geo = mergeGeometries([
+      part(new THREE.BoxGeometry(10, 2.6, 14), 0xe9e2d6, 0, 1.3, 0),
+      part(new THREE.BoxGeometry(10, 3.4, 14), 0x8a5a36, 0, 4.3, 0),
+      part(new THREE.BoxGeometry(10.06, 1.0, 10), 0x2e241c, 0, 4.4, 0),
+      part(new THREE.BoxGeometry(10.06, 0.9, 11), 0x3a4a58, 0, 1.6, 0),
+      part(new THREE.BoxGeometry(12.6, 0.35, 0.8), 0x5a3c26, 0, 3.0, 7.4),             // balcony
+      part(gable(12.4, 16.4, 4.2), 0x5a3c26, 0, 6.0, 0),
+      part(gable(12.0, 16.2, 4.1), 0xf4f7fa, 0, 6.25, 0),
+      part(new THREE.BoxGeometry(1.2, 3.2, 1.2), 0x6b6560, 2.6, 9.0, -4),
+    ]);
     const im = new THREE.InstancedMesh(geo, objMat, m4.length); m4.forEach((m, i) => im.setMatrixAt(i, m)); im.computeBoundingSphere(); hutGroup.add(im);
   }
   badgeT = 0; render();
@@ -1465,6 +1517,37 @@ function buildPlaces() {
     sp.position.set(x, heightAt(x, z) + 25, z); Object.assign(sp.userData, { osm: 'places', hs: ele ? 0.036 : 0.024, prio: 1e6 + ele, far: true }); badgeGroup.add(sp);
   }
 }
+// keep lakes, rivers, roads, paths, buildings and village centres free of the decorative trees
+function clearTrees() {
+  if (!osmData) return;
+  const CS = 40, segs = new Map(), key = (i, j) => i + ',' + j;
+  const addSeg = (ax, az, bx, bz, r) => { const i0 = Math.floor((Math.min(ax, bx) - r) / CS), i1 = Math.floor((Math.max(ax, bx) + r) / CS), j0 = Math.floor((Math.min(az, bz) - r) / CS), j1 = Math.floor((Math.max(az, bz) + r) / CS);
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) { const k = key(i, j); if (!segs.has(k)) segs.set(k, []); segs.get(k).push([ax, az, bx, bz, r]); } };
+  const R = { motorway: 12, trunk: 12, primary: 11, secondary: 10, tertiary: 9, minor: 8, service: 6, rail: 7, transit: 7, track: 5, path: 3.5, river: 10, canal: 8, stream: 4 };
+  for (const list of [osmData.roads, osmData.paths, osmData.rivers]) for (const [c, ll] of list) {
+    const r = R[c] || 5; for (let k = 1; k < ll.length; k++) { const [ax, az] = toXZ(ll[k - 1][0], ll[k - 1][1]), [bx, bz] = toXZ(ll[k][0], ll[k][1]); addSeg(ax, az, bx, bz, r); } }
+  for (const [, ring] of osmData.bld || []) { // buildings: their outline plus 8 m
+    for (let k = 0; k < ring.length; k++) { const [ax, az] = toXZ(ring[k][0], ring[k][1]), [bx, bz] = toXZ(ring[(k + 1) % ring.length][0], ring[(k + 1) % ring.length][1]); addSeg(ax, az, bx, bz, 8); } }
+  const polys = osmData.water.map(([, rings]) => { const rr = rings.map(r => r.map(p => toXZ(p[0], p[1]))); let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const [x, z] of rr[0]) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); } return { rr, x0: x0 - 6, x1: x1 + 6, z0: z0 - 6, z1: z1 + 6 }; });
+  const inRing = (x, z, r) => { let c = false; for (let i = 0, j = r.length - 1; i < r.length; j = i++) if ((r[i][1] > z) !== (r[j][1] > z) && x < (r[j][0] - r[i][0]) * (z - r[i][1]) / (r[j][1] - r[i][1]) + r[i][0]) c = !c; return c; };
+  const PR = { city: 450, town: 300, village: 140, hamlet: 55 };
+  const centres = osmData.places.map(([c, , lon, lat]) => { const [x, z] = toXZ(lon, lat); return [x, z, PR[c] || 0]; });
+  const bad = (x, z) => {
+    const a = segs.get(key(Math.floor(x / CS), Math.floor(z / CS)));
+    if (a) for (const [ax, az, bx, bz, r] of a) { const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz, t = L2 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L2)) : 0; if (Math.hypot(ax + dx * t - x, az + dz * t - z) < r) return true; }
+    for (const p of polys) if (x > p.x0 && x < p.x1 && z > p.z0 && z < p.z1 && inRing(x, z, p.rr[0]) && !p.rr.slice(1).some(h => inRing(x, z, h))) return true;
+    for (const [cx, cz, r] of centres) if (Math.abs(x - cx) < r && Math.abs(z - cz) < r && Math.hypot(x - cx, z - cz) < r) return true;
+    return false;
+  };
+  let removed = 0;
+  for (const im of treeGroup.children) {
+    if (!im.userData.orig) im.userData.orig = { a: im.instanceMatrix.array.slice(), n: im.count };
+    const { a, n } = im.userData.orig, out = im.instanceMatrix.array; let k = 0;
+    for (let i = 0; i < n; i++) { if (bad(a[i * 16 + 12], a[i * 16 + 14])) { removed++; continue; } for (let q = 0; q < 16; q++) out[k * 16 + q] = a[i * 16 + q]; k++; }
+    im.count = k; im.instanceMatrix.needsUpdate = true;
+  }
+  render(); return removed;
+}
 const BUILD = { roads: buildRoads, paths: buildPaths, water: buildWater, places: buildPlaces, bld: buildBuildings };
 function layerUi() {
   for (const k of LAYERS) { const b = $('ly-' + k); b.classList.toggle('on', !!layerOn[k]); b.classList.toggle('busy', osmBusy && layerOn[k] && !osmBuilt[k]); }
@@ -1477,6 +1560,7 @@ async function applyLayers() {
     try { osmData = await window.__osm(!!layerOn.bld, (d, n) => { const b = $('ly-busy'); b.textContent = `Karte laden … ${d}/${n}`; }); }
     catch (e) { window.__toast && window.__toast(navigator.onLine === false ? 'Für Orte & Wege braucht die App beim ersten Mal Internet.' : 'Kartendaten (OpenFreeMap) gerade nicht erreichbar – später nochmal versuchen.'); for (const k of want) if (!osmBuilt[k]) layerOn[k] = false; }
     osmBusy = false; $('ly-busy').textContent = '';
+    clearTrees();
     if (osmData?.partial) window.__toast && window.__toast('Einige Kartenkacheln fehlen – die Ebenen sind evtl. lückenhaft.');
   }
   for (const k of LAYERS) {
@@ -1488,6 +1572,8 @@ async function applyLayers() {
 }
 for (const k of LAYERS) $('ly-' + k).onclick = () => { layerOn[k] = !layerOn[k]; applyLayers(); };
 if (LAYERS.some(k => layerOn[k])) setTimeout(applyLayers, 1500);
+// the basic map data (no buildings) is also used to keep lakes, roads and villages free of trees – load it quietly once
+else setTimeout(() => { if (!osmData) window.__osm(false).then(d => { osmData = d; clearTrees(); }).catch(() => { }); }, 4000);
 layerUi();
 
 // ---------- TAGES-TRACKER ----------
@@ -1985,6 +2071,6 @@ function loop() {
 loop();
 
 window.__hAt = heightAt;
-window.__app = { lyr, layerOn, applyLayers, liftGeo, projLift, trk, sim, analyzeTrack, startTracking, stopTracking, showTrack, applySharedMeet, meetLink, xzToLonLat, setHuts, huts, showHut, nav, gps, startNav, stopNav, focusStep, camera, controls, runs, lifts, showRun, showLift, setMode, G, route, computeRoute, setRouting, buildSteps, meet, computeMeet, setTab, fairMeet, placeName };
+window.__app = { clearTrees, treeGroup, lyr, layerOn, applyLayers, liftGeo, projLift, trk, sim, analyzeTrack, startTracking, stopTracking, showTrack, applySharedMeet, meetLink, xzToLonLat, setHuts, huts, showHut, nav, gps, startNav, stopNav, focusStep, camera, controls, runs, lifts, showRun, showLift, setMode, G, route, computeRoute, setRouting, buildSteps, meet, computeMeet, setTab, fairMeet, placeName };
 
 }
