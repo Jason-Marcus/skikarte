@@ -337,12 +337,22 @@ function makeTextures(M, H, F) {
 // ---------------- offline store (IndexedDB) ----------------
 const IDB = {
   db: null,
-  open() { if (this.db) return Promise.resolve(this.db); return new Promise((res, rej) => { const r = indexedDB.open('skikarte', 1); r.onupgradeneeded = () => r.result.createObjectStore('areas', { keyPath: 'id' }); r.onsuccess = () => res(this.db = r.result); r.onerror = () => rej(r.error); }); },
-  async tx(mode, fn) { const db = await this.open(); return new Promise((res, rej) => { const t = db.transaction('areas', mode), st = t.objectStore('areas'); const r = fn(st); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); }); },
+  open() { if (this.db) return Promise.resolve(this.db); return new Promise((res, rej) => { const r = indexedDB.open('skikarte', 2);
+    r.onupgradeneeded = () => { const db = r.result; if (!db.objectStoreNames.contains('areas')) db.createObjectStore('areas', { keyPath: 'id' }); if (!db.objectStoreNames.contains('tracks')) db.createObjectStore('tracks', { keyPath: 'id' }); };
+    r.onsuccess = () => { this.db = r.result; this.db.onversionchange = () => { this.db.close(); this.db = null; }; res(this.db); }; r.onerror = () => rej(r.error); }); },
+  async tx(mode, fn, store = 'areas') { const db = await this.open(); return new Promise((res, rej) => { const t = db.transaction(store, mode), st = t.objectStore(store); const r = fn(st); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); }); },
   get(id) { return this.tx('readonly', st => st.get(id)).catch(() => null); },
   put(rec) { return this.tx('readwrite', st => st.put(rec)).catch(e => console.warn('save failed', e)); },
   del(id) { return this.tx('readwrite', st => st.delete(id)).catch(() => null); },
   async list() { try { const db = await this.open(); return await new Promise(res => { const out = []; const c = db.transaction('areas').objectStore('areas').openCursor(); c.onsuccess = () => { const cur = c.result; if (cur) { const v = cur.value; out.push({ id: v.id, area: v.area, savedAt: v.savedAt, size: v.size, src: v.data?.src }); cur.continue(); } else res(out); }; c.onerror = () => res(out); }); } catch { return []; } },
+};
+
+// recorded ski days (day tracker)
+window.__TDB = {
+  get: id => IDB.tx('readonly', st => st.get(id), 'tracks').catch(() => null),
+  put: rec => IDB.tx('readwrite', st => st.put(rec), 'tracks').catch(e => console.warn('track save failed', e)),
+  del: id => IDB.tx('readwrite', st => st.delete(id), 'tracks').catch(() => null),
+  async list() { try { const db = await IDB.open(); return await new Promise(res => { const out = []; const c = db.transaction('tracks').objectStore('tracks').openCursor(); c.onsuccess = () => { const cur = c.result; if (cur) { const v = cur.value; out.push({ id: v.id, areaId: v.areaId, areaName: v.areaName, area: v.area, start: v.start, done: v.done, test: v.test, summary: v.summary }); cur.continue(); } else res(out); }; c.onerror = () => res(out); }); } catch { return []; } },
 };
 
 // ---------------- weather ----------------

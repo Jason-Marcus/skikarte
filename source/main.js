@@ -726,7 +726,7 @@ function fitNodes(P, animate = true) {
   const tgt = new THREE.Vector3((x0 + x1) / 2, hs / P.length, (z0 + z1) / 2);
   const dir = camera.position.clone().sub(controls.target).normalize();
   const w = window.innerWidth, h = window.innerHeight;
-  const panelTop = $('route').getBoundingClientRect().top, topLim = 100, botLim = panelTop - 20;
+  const rtp = $('route'), panelTop = rtp.classList.contains('hidden') ? h - 95 : rtp.getBoundingClientRect().top, topLim = 100, botLim = panelTop - 20;
   const off = Math.round(Math.max(0, h - panelTop - 90) * 0.5);
   if (off > 0) camera.setViewOffset(w, h, 0, off, w, h);
   let dist = Math.max(x1 - x0, z1 - z0, 1200) * 1.2;
@@ -1079,6 +1079,7 @@ function routePoints(res, i0 = 0, i1 = res.edges.length - 1) {
 
 // ---------- GPS ----------
 const gps = { watch: null, me: null, xz: null, warned: false, first: true };
+var trk = { on: false, paused: false, pocket: false, rec: null };
 const meGroup = new THREE.Group(); scene.add(meGroup);
 const meDot = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshBasicMaterial({ color: 0x1a73e8, depthTest: false }));
 const meRing = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false }));
@@ -1089,6 +1090,7 @@ function setLocBtn(state) { const b = $('btn-loc'); b.dataset.state = state; }
 function lonlatXZ(lon, lat) { return toXZ(lon, lat); }
 function onPos(p) {
   const c = p.coords; gps.me = { lon: c.longitude, lat: c.latitude, acc: c.accuracy, t: p.timestamp };
+  if (trk.on && !(nav.active && nav.sim)) trkFix(c.longitude, c.latitude, c.accuracy, c.speed, p.timestamp, false);
   const [x, z] = lonlatXZ(c.longitude, c.latitude);
   if (!inside(x, z)) {
     gps.xz = null; meGroup.visible = false; setLocBtn('on');
@@ -1112,6 +1114,7 @@ function flyTo(x, z, dist = 2000) {
 }
 function startGps(high = false) {
   if (!navigator.geolocation) { window.__toast && window.__toast('Standort wird von diesem Gerät nicht unterstützt.'); return; }
+  if (trk.on) high = true;   // the day tracker needs precise fixes
   if (gps.watch !== null) { if (gps.high === high) return; navigator.geolocation.clearWatch(gps.watch); }
   gps.high = high; setLocBtn('wait');
   gps.watch = navigator.geolocation.watchPosition(onPos, err => {
@@ -1123,9 +1126,9 @@ function stopGps() { if (gps.watch !== null) navigator.geolocation.clearWatch(gp
 $('btn-loc').onclick = () => {
   if (gps.watch === null) { gps.first = true; startGps(false); }
   else if (gps.xz) flyTo(gps.xz[0], gps.xz[1], 1800);
-  else stopGps();
+  else if (!trk.on) stopGps();
 };
-document.addEventListener('visibilitychange', () => { if (document.hidden && !nav.active && gps.watch !== null) { navigator.geolocation.clearWatch(gps.watch); gps.watch = null; gps.paused = true; } else if (!document.hidden && gps.paused) { gps.paused = false; startGps(false); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden && !nav.active && !trk.on && gps.watch !== null) { navigator.geolocation.clearWatch(gps.watch); gps.watch = null; gps.paused = true; } else if (!document.hidden && gps.paused) { gps.paused = false; startGps(false); } });
 function meNode() { return gps.xz ? snap(gps.xz[0], gps.xz[1], 300) : null; }
 
 // ---------- NAVIGATION ----------
@@ -1190,7 +1193,7 @@ function stopNav() {
   nav.active = false; document.body.classList.remove('navi'); controls.enabled = true;
   routeGroup.children.forEach(o => { o.visible = true; }); if (route.a !== null) startLbl.el.style.visibility = '';
   try { nav.wake?.release(); } catch { } nav.wake = null;
-  if (gps.watch !== null && gps.high) startGps(false);
+  if (gps.watch !== null && gps.high && !trk.on) startGps(false);
   controls.target.copy(nav.camTgt); controls.update();
   if (routing) $('route').classList.remove('hidden');
   render();
@@ -1219,7 +1222,9 @@ function navUpdate(t) {
   const dt = Math.min(0.1, t - navLastT || 0.016); navLastT = t;
   if (nav.sim && !nav.done && !sim.paused) {
     const st = nav.steps[stepAtProg(sim.d)];
-    const v = st.kind === 'lift' ? (LIFT_SPEED[lifts[st.id].cls] || 3) : st.kind === 'walk' ? WALK_V * 2 : SKI_V;
+    let v = st.kind === 'lift' ? (LIFT_SPEED[lifts[st.id].cls] || 3) : st.kind === 'walk' ? WALK_V * 2 : SKI_V;
+    if (st.kind === 'run') { const a = posAt(sim.d), b = posAt(sim.d + 15); v = Math.min(22, 5 + Math.max(0, (heightAt(a.x, a.z) - heightAt(b.x, b.z)) / 15) * 28); }   // faster on steep pistes
+    trkSim(dt);
     sim.d = Math.min(nav.total, sim.d + v * sim.mult * dt);
     if (sim.latT > 0) { sim.latT -= dt * sim.mult; sim.lat = Math.min(160, sim.lat + 25 * sim.mult * dt); }   // drifting off the route
     sim.pos = simTruth();
@@ -1227,7 +1232,7 @@ function navUpdate(t) {
     if (sim.fixT <= 0) { // one GPS fix per second (scaled), ±6 m noise
       sim.fixT = 1 / Math.max(1, sim.mult / 2);
       const nx = sim.pos.x + (Math.random() - 0.5) * 12, nz = sim.pos.z + (Math.random() - 0.5) * 12;
-      gps.xz = [nx, nz]; gps.me = { acc: 8 }; navOnGps(nx, nz);
+      gps.xz = [nx, nz]; gps.me = { acc: 8 }; trkSimFix(nx, nz); navOnGps(nx, nz);
     }
   }
   const P = posAt(nav.prog), hd = dirAt(nav.prog + 30, 60) * Math.PI / 180;
@@ -1359,6 +1364,456 @@ $('btn-reset').onclick = () => { resetView(); render(); };
 $('pr-close').onclick = () => { closePanels(); };
 updateUi();
 
+// ---------- TAGES-TRACKER ----------
+// Records GPS fixes of a ski day and turns them into stats: runs, lift rides, vertical, top speed, pistes, pauses.
+const TDB = window.__TDB;
+const AREA = window.__AREA || {};
+trk.lastSave = 0; trk.simExtra = 0; trk.res = null; trk.resAt = 0; trk.view = null; trk.shown = null; trk.wake = null;
+const fmtKm = m => (m / 1000).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const fmtInt = n => Math.round(n).toLocaleString('de-DE');
+const fmtDur = s => { const m = Math.max(0, Math.round(s / 60)); return m < 60 ? m + ' min' : Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0') + ' h'; };
+const fmtClock = t => new Date(t * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+const fmtDate = t => new Date(t * 1000).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+const runTitle = r => r.ref && r.name ? r.ref + ' ' + r.name : r.name || (r.ref ? 'Piste ' + r.ref : 'Piste ohne Namen');
+const liftTitle = l => l.name || LIFT_DE[l.cls] || 'Lift';
+
+// lift lines oriented bottom -> top, with a bounding box for fast rejection
+const liftGeo = lifts.map((l, li) => {
+  let P = l.path; if (heightAt(P[0].x, P[0].z) > heightAt(P[P.length - 1].x, P[P.length - 1].z)) P = P.slice().reverse();
+  const s = [0]; for (let k = 1; k < P.length; k++) s.push(s[k - 1] + Math.hypot(P[k].x - P[k - 1].x, P[k].z - P[k - 1].z));
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const q of P) { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); z0 = Math.min(z0, q.z); z1 = Math.max(z1, q.z); }
+  return { li, P, s, len: s[s.length - 1], x0: x0 - 80, x1: x1 + 80, z0: z0 - 80, z1: z1 + 80 };
+});
+function projLift(g, x, z) {
+  let bd = Infinity, bs = 0;
+  for (let k = 0; k < g.P.length - 1; k++) {
+    const a = g.P[k], b = g.P[k + 1], dx = b.x - a.x, dz = b.z - a.z, L2 = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / L2)), d = Math.hypot(a.x + dx * t - x, a.z + dz * t - z);
+    if (d < bd) { bd = d; bs = g.s[k] + (g.s[k + 1] - g.s[k]) * t; }
+  }
+  return [bd, bs];
+}
+const runNodeK = new Map(); runs.forEach((r, ri) => r.nodes.forEach((id, k) => runNodeK.set(id, [ri, k])));
+function runAt(x, z) { // nearest piste within 40 m
+  let best = null, bd = 41;
+  for (const [id, d] of near(x, z, 40)) { const rk = runNodeK.get(id); if (rk && d < bd) { bd = d; best = rk; } }
+  return best;
+}
+
+function analyzeTrack(rec) {
+  const P = rec.pts, pt = [];
+  for (let o = 0; o + 4 < P.length; o += 5) { const [x, z] = toXZ(P[o + 1], P[o + 2]); if (inside(x, z)) pt.push({ t: P[o] / 1000, rx: x, rz: z, acc: P[o + 3], gs: P[o + 4] }); }
+  const N = pt.length;
+  const R = { N, pt, rides: [], segs: [], items: [], stops: [], diff: {}, start: N ? pt[0].t : (rec.start || 0) / 1000, end: N ? pt[N - 1].t : (rec.end || 0) / 1000 };
+  const T = R.tot = { walk: 0, runs: 0, piste: 0, ski: 0, descent: 0, rides: 0, liftUp: 0, vmax: 0, vmaxRun: null, vmaxT: 0, skiTime: 0, liftTime: 0, pauseTime: 0, gapTime: 0, maxH: 0, maxHT: 0, steep: 0, steepRun: null, longest: null, fav: null, huts: [] };
+  if (N < 3) return R;
+  // 1) smoothing (accuracy-weighted 5-point mean, never across gaps) + terrain height
+  for (let i = 0; i < N; i++) {
+    let sx = 0, sz = 0, sw = 0;
+    for (let j = Math.max(0, i - 2); j <= Math.min(N - 1, i + 2); j++) { if (Math.abs(pt[j].t - pt[i].t) > 8) continue; const w = (j === i ? 2 : 1) / Math.max(4, pt[j].acc); sx += pt[j].rx * w; sz += pt[j].rz * w; sw += w; }
+    pt[i].x = sx / sw; pt[i].z = sz / sw; pt[i].h = heightAt(pt[i].x, pt[i].z);
+  }
+  const GAP = 45;
+  for (let i = 0; i < N; i++) {
+    const p = pt[i]; p.dt = i ? p.t - pt[i - 1].t : 0; p.gap = p.dt > GAP;
+    p.d = i && !p.gap ? Math.hypot(p.x - pt[i - 1].x, p.z - pt[i - 1].z, p.h - pt[i - 1].h) : 0;
+  }
+  for (let i = 0; i < N; i++) { // speed over ±2 fixes
+    let a = i, b = i, dd = 0;
+    while (a > 0 && i - a < 2 && !pt[a].gap) { dd += pt[a].d; a--; }
+    while (b < N - 1 && b - i < 2 && !pt[b + 1].gap) { b++; dd += pt[b].d; }
+    const dt = pt[b].t - pt[a].t; pt[i].v = dt >= 2 ? dd / dt : 0;
+  }
+  // 2) lift rides: steady progress along a lift line
+  const cand = [];
+  for (const g of liftGeo) {
+    const l = lifts[g.li]; if (g.len < 60) continue;
+    const nr = [];
+    for (let i = 0; i < N; i++) {
+      const p = pt[i]; if (p.x < g.x0 || p.x > g.x1 || p.z < g.z0 || p.z > g.z1) continue;
+      const [d, s] = projLift(g, p.x, p.z); if (d <= Math.max(30, Math.min(60, p.acc * 1.5))) nr.push([i, s, d]);
+    }
+    let k0 = 0;
+    for (let k = 1; k <= nr.length; k++) {
+      if (k < nr.length && pt[nr[k][0]].t - pt[nr[k - 1][0]].t <= 45) continue;
+      const seg = nr.slice(k0, k); k0 = k; if (seg.length < 3) continue;
+      const tryRide = (b, down) => {
+        if (!b || b.up < 0.6 * g.len) return;
+        const ia = seg[b.a][0], ib = seg[b.b][0], dur = pt[ib].t - pt[ia].t; if (dur < 20) return;
+        const u = b.up / dur, V = LIFT_SPEED[l.cls] || 3;
+        if (u < 0.3 || u > 13) return;
+        if (down) {
+          if (u < 0.5 * V || u > 1.4 * V) return;
+          let path = 0; for (let i = ia + 1; i <= ib; i++) path += Math.hypot(pt[i].x - pt[i - 1].x, pt[i].z - pt[i - 1].z);
+          if (path > b.up * 1.12) return;   // skiing is never this straight
+        }
+        let md = 0; for (let j = b.a; j <= b.b; j++) md += seg[j][2]; md /= b.b - b.a + 1;
+        cand.push({ li: g.li, ia, ib, down, cov: Math.min(1, b.up / g.len), md, t0: pt[ia].t, t1: pt[ib].t });
+      };
+      let mi = 0, best = null;
+      for (let j = 1; j < seg.length; j++) { if (seg[j][1] <= seg[mi][1]) mi = j; const up = seg[j][1] - seg[mi][1]; if (!best || up > best.up) best = { a: mi, b: j, up }; }
+      tryRide(best, false);
+      if (l.cls === 'gondola' || l.cls === 'cable_car') {
+        let ma = 0, bd = null;
+        for (let j = 1; j < seg.length; j++) { if (seg[j][1] >= seg[ma][1]) ma = j; const dn = seg[ma][1] - seg[j][1]; if (!bd || dn > bd.up) bd = { a: ma, b: j, up: dn }; }
+        tryRide(bd, true);
+      }
+    }
+  }
+  cand.sort((a, b) => (b.cov - b.md / 150) - (a.cov - a.md / 150));
+  for (const c of cand) {
+    if (R.rides.some(r => Math.min(r.t1, c.t1) - Math.max(r.t0, c.t0) > 0.3 * (c.t1 - c.t0))) continue;
+    R.rides.push(c);
+  }
+  R.rides.sort((a, b) => a.t0 - b.t0);
+  const lab = new Array(N).fill(-1);
+  R.rides.forEach((r, k) => {
+    for (let i = r.ia; i <= r.ib; i++) lab[i] = k;
+    r.dur = r.t1 - r.t0; r.up = pt[r.ib].h - pt[r.ia].h;
+    T.liftTime += r.dur;
+    if (!r.down) { T.rides++; T.liftUp += Math.max(0, r.up); }
+  });
+  // 3) everything between lift rides: runs, walks, pauses
+  let i = 0;
+  while (i < N) {
+    if (lab[i] >= 0) { i++; continue; }
+    let j = i; while (j + 1 < N && lab[j + 1] < 0 && !(pt[j + 1].gap && pt[j + 1].dt > 120)) j++;
+    R.segs.push(segStats(i, j)); i = j + 1;
+  }
+  function segStats(a, b) {
+    const S = { a, b, t0: pt[a].t, t1: pt[b].t, walk: 0, dist: 0, piste: 0, descent: 0, vmax: 0, vmaxRun: null, move: 0, runs: [], steep: 0, steepRun: null, diff: {} };
+    let ref = pt[a].h, stop0 = -1, prevRun = null;
+    const mv = k => pt[k].v > 1.4;
+    for (let k = a; k <= b; k++) {
+      const p = pt[k];
+      if (p.h < ref - 4) { S.descent += ref - p.h; ref = p.h; } else if (p.h > ref + 4) ref = p.h;
+      // pauses
+      if (!mv(k)) { if (stop0 < 0) stop0 = k; }
+      if ((mv(k) || k === b) && stop0 >= 0) { const e = mv(k) ? k - 1 : k; if (pt[e].t - pt[stop0].t >= 120) addStop(stop0, e); stop0 = -1; }
+      if (k === a || p.gap) continue;
+      if (!mv(k) && !mv(k - 1)) continue;
+      if (p.v < 2.2 && p.h >= pt[k - 1].h - 0.5) { S.walk += p.d; continue; }   // walking / pushing on the flat – not skiing
+      S.dist += p.d; S.move += p.dt; S.te = p.t; if (S.ts === undefined) S.ts = pt[k - 1].t;
+      const rk = runAt(p.x, p.z); p.run = rk ? rk[0] : -1;
+      const cls = rk ? (runs[rk[0]].cls === 'expert' ? 'advanced' : runs[rk[0]].cls || '') : 'off';
+      S.diff[cls] = (S.diff[cls] || 0) + p.d;
+      if (rk) {
+        S.piste += p.d;
+        if (prevRun === rk[0]) { const g = Math.abs(runs[rk[0]].s[rk[1]].g || 0); if (g > S.steep) { S.steep = g; S.steepRun = rk[0]; } }
+        const last = S.runs[S.runs.length - 1];
+        if (last && last.ri === rk[0]) last.d += p.d; else S.runs.push({ ri: rk[0], d: p.d });
+      }
+      prevRun = rk ? rk[0] : null;
+      if (p.acc <= 25 && p.v < 36) {
+        let v = p.v; if (p.gs >= 0 && Math.abs(p.gs - p.v) <= 0.3 * p.v + 1.5) v = p.gs;
+        if (v > S.vmax) { S.vmax = v; S.vmaxRun = rk ? rk[0] : null; S.vmaxT = p.t; }
+      }
+    }
+    S.runs = S.runs.filter(r => r.d >= 60);
+    S.isRun = S.descent >= 50 && S.dist >= 200;
+    return S;
+  }
+  function addStop(a, b) {
+    const x = (pt[a].x + pt[b].x) / 2, z = (pt[a].z + pt[b].z) / 2, dur = pt[b].t - pt[a].t;
+    let hut = null, hd = 120; for (const h of huts) { const d = Math.hypot(h.x - x, h.z - z); if (d < hd) { hd = d; hut = h; } }
+    R.stops.push({ a, b, t0: pt[a].t, t1: pt[b].t, dur, x, z, hut: dur >= 480 ? hut : null });
+  }
+  // 4) totals
+  let nRun = 0;
+  for (const S of R.segs) {
+    T.walk += S.walk;
+    if (!S.isRun) continue;
+    S.n = ++nRun; T.runs++; T.ski += S.dist; T.piste += S.piste; T.descent += S.descent; T.skiTime += S.move;
+    for (const k in S.diff) R.diff[k] = (R.diff[k] || 0) + S.diff[k];
+    if (S.vmax > T.vmax) { T.vmax = S.vmax; T.vmaxRun = S.vmaxRun; T.vmaxT = S.vmaxT; }
+    if (S.steep > T.steep) { T.steep = S.steep; T.steepRun = S.steepRun; }
+    if (!T.longest || S.dist > T.longest.dist) T.longest = { n: S.n, dist: S.dist, descent: S.descent };
+  }
+  for (const s of R.stops) T.pauseTime += s.dur;
+  for (let k = 1; k < N; k++) if (pt[k].gap) T.gapTime += pt[k].dt;
+  for (const p of pt) if (p.h > T.maxH) { T.maxH = p.h; T.maxHT = p.t; }
+  const cnt = new Map(); for (const r of R.rides) if (!r.down) cnt.set(r.li, (cnt.get(r.li) || 0) + 1);
+  for (const [li, n] of cnt) if (!T.fav || n > T.fav.n) T.fav = { li, n };
+  T.huts = [...new Set(R.stops.filter(s => s.hut).map(s => s.hut.name || HUT_DE[s.hut.type] || 'Hütte'))];
+  // 5) timeline
+  for (const r of R.rides) R.items.push({ kind: 'lift', t0: r.t0, t1: r.t1, a: r.ia, b: r.ib, r });
+  for (const S of R.segs) if (S.isRun) R.items.push({ kind: 'run', t0: S.ts ?? S.t0, t1: S.te ?? S.t1, a: S.a, b: S.b, S });
+  for (const s of R.stops) if (s.dur >= 480) R.items.push({ kind: 'stop', t0: s.t0, t1: s.t1, a: s.a, b: s.b, s });
+  for (let k = 1; k < N; k++) if (pt[k].gap && pt[k].dt >= 120) R.items.push({ kind: 'gap', t0: pt[k - 1].t, t1: pt[k].t, a: k - 1, b: k });
+  R.items.sort((a, b) => a.t0 - b.t0);
+  R.lab = lab;
+  return R;
+}
+function summarize(R) {
+  const T = R.tot;
+  return { start: R.start, end: R.end, runs: T.runs, piste: Math.round(T.piste), ski: Math.round(T.ski), descent: Math.round(T.descent), rides: T.rides, vmax: Math.round(T.vmax * 10) / 10, n: R.N };
+}
+
+// ---------- recording ----------
+function trkFix(lon, lat, acc, spd, t, isSim) {
+  if (!trk.on || trk.paused || !trk.rec) return;
+  if (!(acc <= 50)) return;
+  const P = trk.rec.pts, n = P.length;
+  if (n) {
+    const lt = P[n - 5]; if (t - lt < 900) return;
+    const dm = Math.hypot((lon - P[n - 4]) * M.mlon, (lat - P[n - 3]) * M.mlat);
+    if (dm < 3 && t - lt < 10000) return;
+  }
+  P.push(Math.round(t), +lon.toFixed(6), +lat.toFixed(6), Math.round(acc), spd == null || !(spd >= 0) ? -1 : Math.round(spd * 10) / 10);
+  if (isSim) trk.rec.test = true;
+  trk.rec.end = Math.round(t);
+  if (Date.now() - trk.lastSave > 15000) saveTrk();
+}
+function saveTrk() { if (!trk.rec || !TDB) return; trk.lastSave = Date.now(); TDB.put(trk.rec); }
+async function trkWake() { if (!trk.on || document.hidden) return; try { trk.wake = await navigator.wakeLock?.request('screen'); } catch { } }
+function trkResult(force) {
+  if (!trk.rec) return null;
+  if (force || !trk.res || Date.now() - trk.resAt > 15000) { trk.res = analyzeTrack(trk.rec); trk.resAt = Date.now(); }
+  return trk.res;
+}
+function startTracking(resumeRec) {
+  trk.rec = resumeRec || { id: 'trk-' + Date.now(), areaId: AREA.id, areaName: AREA.name || '', area: AREA, start: Date.now(), end: Date.now(), pts: [], test: false, done: false };
+  trk.on = true; trk.paused = false; trk.res = null; trk.simExtra = 0;
+  localStorage.setItem('trk:active', trk.rec.id);
+  saveTrk(); startGps(true); trkWake(); trkUi();
+}
+async function stopTracking() {
+  const rec = trk.rec; trk.on = false; trk.paused = false; setPocket(false);
+  try { trk.wake?.release(); } catch { } trk.wake = null;
+  localStorage.removeItem('trk:active');
+  if (gps.watch !== null && !nav.active) startGps(false);
+  const R = analyzeTrack(rec);
+  if (R.N < 10) { await TDB.del(rec.id); trk.rec = null; trkUi(); window.__toast && window.__toast('Zu wenige GPS-Punkte in diesem Skigebiet – nichts gespeichert.'); return; }
+  rec.done = true; rec.summary = summarize(R); await TDB.put(rec);
+  trk.rec = null; trk.view = { rec, R }; trkUi(); openTrk();
+}
+// testing at the PC: the virtual skier of the "Testfahrt" feeds the tracker with simulated time
+function trkSim(dt) { if (trk.on && !trk.paused) trk.simExtra += dt * (sim.mult - 1) * 1000; }
+function trkSimFix(x, z) { if (!trk.on) return; const [lon, lat] = xzToLonLat(x, z); trkFix(lon, lat, 8, null, Date.now() + trk.simExtra, true); }
+
+// ---------- UI ----------
+const tkSheet = $('trk'), tkBody = $('trk-body');
+function openTrk() { tkSheet.classList.remove('hidden'); renderTrk(); }
+function closeTrk() { tkSheet.classList.add('hidden'); }
+$('btn-trk').onclick = () => { if (tkSheet.classList.contains('hidden')) openTrk(); else closeTrk(); };
+$('trk-pill').onclick = () => { trk.view = null; openTrk(); };
+tkSheet.onclick = e => { if (e.target === tkSheet) closeTrk(); };
+function tile(v, l, cls = '') { return `<div class="tk-t ${cls}"><b>${v}</b><small>${l}</small></div>`; }
+function liveTiles(R) {
+  const T = R.tot, now = Date.now() / 1000;
+  return tile(fmtDur((trk.rec.end - trk.rec.start) / 1000), 'Dauer') + tile(fmtKm(T.piste), 'km Piste') + tile(T.runs, T.runs === 1 ? 'Abfahrt' : 'Abfahrten')
+    + tile(fmtInt(T.descent), 'Tiefenmeter') + tile(Math.round(T.vmax * 3.6), 'km/h max') + tile(T.rides, T.rides === 1 ? 'Liftfahrt' : 'Liftfahrten');
+}
+function curSpeed() {
+  const P = trk.rec?.pts; if (!P || P.length < 15) return null;
+  const n = P.length, now = Date.now() + (nav.sim ? trk.simExtra : 0); if (now - P[n - 5] > 15000) return null;
+  const i = n - 15, d = Math.hypot((P[n - 4] - P[i + 1]) * M.mlon, (P[n - 3] - P[i + 2]) * M.mlat), dt = (P[n - 5] - P[i]) / 1000;
+  return dt > 0 ? d / dt : null;
+}
+function renderTrk() {
+  if (trk.view) return renderDay(trk.view);
+  if (trk.on) {
+    const R = trkResult(), v = curSpeed();
+    tkBody.innerHTML = `<h2>Tages-Tracker <span class="tk-rec${trk.paused ? ' paused' : ''}">${trk.paused ? 'Pausiert' : '● Aufnahme'}</span></h2>
+      <div class="tk-grid">${liveTiles(R)}</div>
+      <div class="tk-now">${trk.paused ? 'Aufzeichnung pausiert.' : v === null ? 'Warte auf GPS …' : 'Gerade: <b>' + Math.round(v * 3.6) + ' km/h</b>'}${trk.rec.test ? ' · <span class="tk-test">Test</span>' : ''}</div>
+      <div class="tk-row"><button id="tk-pocket" class="tg">🌙 Taschenmodus</button><button id="tk-pause" class="tg">${trk.paused ? '▶ Weiter' : '⏸ Pause'}</button></div>
+      <div class="tk-row"><button id="tk-sum" class="tg">Bilanz bisher</button><button id="tk-stop" class="tg danger">■ Beenden</button></div>
+      <p class="tk-note">Die App muss geöffnet bleiben, sonst stoppt der Browser das GPS. Der <b>Taschenmodus</b> macht den Bildschirm schwarz und hält ihn wach – zum Entsperren zweimal tippen. Testen am PC: unter <b>Route</b> eine <b>Testfahrt</b> starten, sie wird mit aufgezeichnet.</p>`;
+    $('tk-pocket').onclick = () => { closeTrk(); setPocket(true); };
+    $('tk-pause').onclick = () => { trk.paused = !trk.paused; saveTrk(); renderTrk(); trkUi(); };
+    $('tk-sum').onclick = () => { trk.view = { rec: trk.rec, R: trkResult(true), live: true }; renderTrk(); };
+    $('tk-stop').onclick = e => { const b = e.currentTarget; if (b.dataset.sure) stopTracking(); else { b.dataset.sure = 1; b.textContent = 'Wirklich beenden?'; setTimeout(() => { if (b.isConnected) { delete b.dataset.sure; b.textContent = '■ Beenden'; } }, 3000); } };
+    return;
+  }
+  tkBody.innerHTML = `<h2>Tages-Tracker</h2>
+    <p class="tk-intro">Zeichnet deinen Skitag per GPS auf und zeigt danach Abfahrten, Pistenkilometer, Tiefenmeter, Höchsttempo, Liftfahrten, Pausen und deine steilste Piste.</p>
+    <button id="tk-start" class="tk-big">▶ Aufzeichnung starten</button>
+    <p class="tk-note">Hinweis: Als Web-App läuft die Aufzeichnung nur, solange die App geöffnet ist. Mit dem Taschenmodus (schwarzer Bildschirm) kannst du das Handy einstecken.</p>
+    <h3>Meine Skitage</h3><ul id="tk-list"><li class="muted">Lade …</li></ul>`;
+  $('tk-start').onclick = () => { if (!AREA.id) return; startTracking(); renderTrk(); };
+  renderList();
+}
+async function renderList() {
+  const ul = $('tk-list'); if (!ul) return;
+  const all = (await TDB.list()).filter(r => r.done && r.summary).sort((a, b) => b.start - a.start);
+  if (!all.length) { ul.innerHTML = '<li class="muted">Noch keine Skitage aufgezeichnet.</li>'; return; }
+  ul.innerHTML = '';
+  for (const r of all) {
+    const s = r.summary, li = document.createElement('li');
+    li.innerHTML = `<div><b>${fmtDate(s.start)}</b>${r.test ? ' <span class="tk-test">Test</span>' : ''}<small>${esc(r.areaName)} · ${s.pending ? 'Bilanz wird beim Öffnen berechnet' : `${fmtKm(s.piste)} km Piste · ${s.runs} Abfahrten · ${fmtInt(s.descent)} Tm · ${Math.round(s.vmax * 3.6)} km/h`}</small></div><span class="tk-go">›</span>`;
+    li.onclick = async () => {
+      if (r.areaId !== AREA.id) { localStorage.setItem('skiarea', JSON.stringify(r.area)); localStorage.setItem('trk:open', r.id); location.reload(); return; }
+      const rec = await TDB.get(r.id); if (rec) { trk.view = { rec, R: analyzeTrack(rec) }; renderTrk(); }
+    };
+    ul.appendChild(li);
+  }
+}
+const DIFF_BAR = [['novice', '#2e9d4f', 'Übung'], ['easy', '#1f6fd1', 'Blau'], ['intermediate', '#d7262b', 'Rot'], ['advanced', '#15171a', 'Schwarz'], ['freeride', '#f08a24', 'Skiroute'], ['', '#7b8794', 'Ohne Angabe'], ['off', '#b9c2cc', 'Abseits']];
+function profileSvg(R) {
+  const pt = R.pt, N = pt.length, W0 = 340, H0 = 110, t0 = R.start, t1 = Math.max(R.end, t0 + 60);
+  let h0 = Infinity, h1 = -Infinity; for (const p of pt) { h0 = Math.min(h0, p.h); h1 = Math.max(h1, p.h); } if (h1 - h0 < 50) h1 = h0 + 50;
+  const X = t => 30 + (t - t0) / (t1 - t0) * (W0 - 34), Y = h => 8 + (1 - (h - h0) / (h1 - h0)) * (H0 - 26);
+  const step = Math.max(1, Math.floor(N / 500));
+  let lines = '', cur = null, d = '', prev = null;
+  for (let i = 0; i < N; i += step) {
+    const k = R.lab[i] >= 0 ? 'l' : pt[i].v > 1.4 ? 's' : 'p';
+    const xy = `${X(pt[i].t).toFixed(1)},${Y(pt[i].h).toFixed(1)}`;
+    let gap = false; for (let j = Math.max(1, i - step + 1); j <= i; j++) if (pt[j].gap) gap = true;
+    if (gap || k !== cur) { if (d) lines += `<path d="${d}" class="pf-${cur}"/>`; d = (!gap && prev ? 'M' + prev + ' L' : 'M') + xy; cur = k; }
+    else d += ' L' + xy;
+    prev = xy;
+  }
+  if (d) lines += `<path d="${d}" class="pf-${cur}"/>`;
+  let ticks = ''; const hrs = new Date(t0 * 1000); hrs.setMinutes(0, 0, 0);
+  for (let t = hrs.getTime() / 1000 + 3600; t < t1; t += 3600) ticks += `<line x1="${X(t)}" x2="${X(t)}" y1="8" y2="${H0 - 18}" class="pf-grid"/><text x="${X(t)}" y="${H0 - 5}" text-anchor="middle">${new Date(t * 1000).getHours()} h</text>`;
+  return `<svg viewBox="0 0 ${W0} ${H0}" class="tk-prof">${ticks}<text x="2" y="14">${fmtInt(h1)}</text><text x="2" y="${H0 - 20}">${fmtInt(h0)}</text>${lines}</svg>
+    <div class="tk-leg"><span><i class="pf-s"></i>Ski</span><span><i class="pf-l"></i>Lift</span><span><i class="pf-p"></i>Stehen</span></div>`;
+}
+function itemHtml(it, k) {
+  if (it.kind === 'lift') { const l = lifts[it.r.li]; return `<li data-k="${k}"><span class="tk-ic lift">${it.r.down ? '↓' : '↑'}</span><div><b>${esc(liftTitle(l))}${it.r.down ? ' (Talfahrt)' : ''}</b><small>${fmtClock(it.t0)} · ${fmtDur(it.r.dur)} · ${it.r.down ? '' : '+'}${fmtInt(it.r.up)} Hm</small></div></li>`; }
+  if (it.kind === 'run') { const S = it.S, names = S.runs.map(r => esc(runs[r.ri].ref ? runs[r.ri].ref : runTitle(runs[r.ri]))).join(' → ');
+    return `<li data-k="${k}"><span class="tk-ic run">${S.n}</span><div><b>Abfahrt ${S.n}</b><small>${fmtClock(it.t0)} · ${fmtKm(S.dist)} km · ${fmtInt(S.descent)} Tm · max ${Math.round(S.vmax * 3.6)} km/h${names ? '<br>' + names : ''}</small></div></li>`; }
+  if (it.kind === 'stop') return `<li data-k="${k}"><span class="tk-ic stop">☕</span><div><b>${it.s.hut ? esc(it.s.hut.name || HUT_DE[it.s.hut.type] || 'Hütte') : 'Pause'}</b><small>${fmtClock(it.t0)} · ${fmtDur(it.s.dur)}</small></div></li>`;
+  return `<li data-k="${k}" class="gap"><span class="tk-ic gap">…</span><div><b>GPS-Lücke</b><small>${fmtClock(it.t0)}–${fmtClock(it.t1)} · App war geschlossen oder kein Empfang</small></div></li>`;
+}
+function renderDay(V) {
+  const { rec, R } = V, T = R.tot;
+  const total = Object.values(R.diff).reduce((a, b) => a + b, 0) || 1;
+  const bar = DIFF_BAR.filter(([k]) => R.diff[k] > 20).map(([k, c, n]) => `<span style="flex:${R.diff[k]};background:${c}" title="${n}"></span>`).join('');
+  const barLeg = DIFF_BAR.filter(([k]) => R.diff[k] > 20).map(([k, c, n]) => `<span><i style="background:${c}"></i>${n} ${fmtKm(R.diff[k])} km</span>`).join('');
+  const hl = [];
+  if (T.longest) hl.push(['Längste Abfahrt', `Nr. ${T.longest.n} · ${fmtKm(T.longest.dist)} km · ${fmtInt(T.longest.descent)} Tm`]);
+  if (T.steepRun !== null && T.steep > 0) hl.push(['Steilste Piste', `${esc(runTitle(runs[T.steepRun]))} · <b style="color:${pctCss(T.steep)}">${Math.round(T.steep)} %</b>`]);
+  if (T.vmax > 0) hl.push(['Höchsttempo', `${Math.round(T.vmax * 3.6)} km/h${T.vmaxRun !== null && T.vmaxRun !== undefined ? ' · ' + esc(runTitle(runs[T.vmaxRun])) : ''} · ${fmtClock(T.vmaxT)}`]);
+  if (T.fav) hl.push(['Lieblingslift', `${esc(liftTitle(lifts[T.fav.li]))} · ${T.fav.n}×`]);
+  hl.push(['Höchster Punkt', `${fmtInt(T.maxH)} m · ${fmtClock(T.maxHT)}`]);
+  if (T.huts.length) hl.push(['Einkehr', T.huts.map(esc).join(', ')]);
+  tkBody.innerHTML = `<div class="tk-head"><button id="tk-back" aria-label="Zurück">‹</button><div><b>${V.live ? 'Bilanz bisher' : 'Skitag ' + fmtDate(R.start)}</b>${rec.test ? ' <span class="tk-test">Test</span>' : ''}<small>${esc(rec.areaName)} · ${fmtClock(R.start)}–${fmtClock(R.end)}</small></div></div>
+    ${R.N < 3 ? '<p class="tk-intro">Noch keine GPS-Punkte in diesem Skigebiet.</p>' : `
+    <div class="tk-grid">${tile(fmtKm(T.piste), 'km Piste') + tile(T.runs, T.runs === 1 ? 'Abfahrt' : 'Abfahrten') + tile(fmtInt(T.descent), 'Tiefenmeter')
+      + tile(Math.round(T.vmax * 3.6), 'km/h max') + tile(T.rides, T.rides === 1 ? 'Liftfahrt' : 'Liftfahrten') + tile(fmtInt(T.liftUp), 'Hm mit Lift')
+      + tile(T.skiTime ? Math.round(T.ski / T.skiTime * 3.6) : 0, 'km/h Ø Fahrt') + tile(fmtDur(T.skiTime), 'auf Ski') + tile(fmtDur(T.liftTime), 'im Lift')}</div>
+    <div class="tk-hl">${hl.map(([a, b]) => `<div><span>${a}</span><span>${b}</span></div>`).join('')}</div>
+    ${bar ? `<h3>Pisten nach Schwierigkeit</h3><div class="tk-bar">${bar}</div><div class="tk-leg">${barLeg}</div>` : ''}
+    <h3>Höhenprofil</h3>${profileSvg(R)}
+    <div class="tk-times">${fmtDur(R.end - R.start)} gesamt · ${fmtDur(T.pauseTime)} Pausen${T.walk >= 100 ? ' · ' + fmtKm(T.walk) + ' km zu Fuß' : ''}${T.gapTime > 120 ? ' · ' + fmtDur(T.gapTime) + ' ohne GPS' : ''}</div>
+    <h3>Tagesablauf</h3><ul class="tk-tl">${R.items.map(itemHtml).join('')}</ul>`}
+    <div class="tk-row"><button id="tk-map" class="tg primary">Spur auf der Karte</button>${V.live ? '' : '<button id="tk-share" class="tg">Teilen</button><button id="tk-del" class="tg danger">Löschen</button>'}</div>
+    <p class="tk-note">Werte aus GPS und Höhenmodell berechnet – Schätzungen. Tiefenmeter = Summe aller Abfahrts-Höhenmeter.</p>`;
+  $('tk-back').onclick = () => { trk.view = null; renderTrk(); };
+  if (R.N >= 3) {
+    $('tk-map').onclick = () => { showTrack(V); closeTrk(); fitTrack(R, 0, R.N - 1); };
+    tkBody.querySelectorAll('.tk-tl li').forEach(li => li.onclick = () => { const it = R.items[+li.dataset.k]; showTrack(V, it); closeTrk(); fitTrack(R, it.a, it.b); });
+  } else $('tk-map').classList.add('hidden');
+  if (!V.live) {
+    $('tk-share').onclick = () => shareDay(rec, R);
+    $('tk-del').onclick = async e => { const b = e.currentTarget; if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Wirklich löschen?'; return; } await TDB.del(rec.id); if (trk.shown && trk.shown.rec === rec) hideTrack(); trk.view = null; renderTrk(); };
+  }
+}
+async function shareDay(rec, R) {
+  const T = R.tot;
+  const lines = [`⛷ Skitag in ${rec.areaName} · ${fmtDate(R.start)}`, `${fmtKm(T.piste)} km Piste · ${T.runs} Abfahrten · ${fmtInt(T.descent)} Tiefenmeter`, `Höchsttempo ${Math.round(T.vmax * 3.6)} km/h · ${T.rides} Liftfahrten`];
+  if (T.steepRun !== null && T.steep > 0) lines.push(`Steilste Piste: ${runTitle(runs[T.steepRun])} (${Math.round(T.steep)} %)`);
+  if (T.huts.length) lines.push('Einkehr: ' + T.huts.join(', '));
+  const url = location.protocol === 'https:' ? location.origin + location.pathname : 'https://jason-marcus.github.io/skikarte/';
+  const text = lines.join('\n') + '\n– aufgezeichnet mit der 3D Skikarte';
+  try { if (navigator.share) { await navigator.share({ title: 'Mein Skitag', text, url }); return; } await navigator.clipboard.writeText(text + '\n' + url); window.__toast && window.__toast('Tagesbilanz kopiert.'); }
+  catch (e) { if (e && e.name !== 'AbortError') window.__toast && window.__toast('Teilen nicht möglich.'); }
+}
+
+// ---------- track on the 3D map (colour = speed) ----------
+const trackGroup = new THREE.Group(); scene.add(trackGroup);
+const SPD = [[0, 0x2e9d4f], [25, 0x9bc53d], [45, 0xf2c12e], [65, 0xf07b24], [85, 0xd7262b]];
+function spdColor(kmh) { const c = new THREE.Color(); for (let k = SPD.length - 1; k >= 0; k--) if (kmh >= SPD[k][0]) { if (k === SPD.length - 1) return c.setHex(SPD[k][1]); const t = (kmh - SPD[k][0]) / (SPD[k + 1][0] - SPD[k][0]); return c.setHex(SPD[k][1]).lerp(new THREE.Color(SPD[k + 1][1]), t); } return c.setHex(SPD[0][1]); }
+function clearTrack() { for (const o of trackGroup.children) { const k = lineMats.indexOf(o.material); if (k >= 0) lineMats.splice(k, 1); o.material.dispose(); o.geometry.dispose(); } trackGroup.clear(); }
+function showTrack(V, it) {
+  clearTrack(); trk.shown = V;
+  const R = V.R, pt = R.pt, pos = [], col = [], cg = new THREE.Color(0x7d8a97);
+  for (let i = 1; i < R.N; i++) {
+    if (pt[i].gap) continue;
+    const a = pt[i - 1], b = pt[i], lift = R.lab[i] >= 0 && R.lab[i - 1] >= 0;
+    const dim = it && (i < it.a || i > it.b);
+    const c = lift ? cg.clone() : spdColor(b.v * 3.6); if (dim) c.lerp(new THREE.Color(0xffffff), 0.75);
+    const ya = lift ? liftY(R.rides[R.lab[i]], a) : meshHeight(a.x, a.z) + 7, yb = lift ? liftY(R.rides[R.lab[i]], b) : meshHeight(b.x, b.z) + 7;
+    pos.push(a.x, ya, a.z, b.x, yb, b.z); col.push(c.r, c.g, c.b, c.r, c.g, c.b);
+  }
+  if (pos.length) {
+    const g = new LineSegmentsGeometry(); g.setPositions(pos); g.setColors(col);
+    const g2 = new LineSegmentsGeometry(); g2.setPositions(pos);
+    const halo = new LineSegments2(g2, makeLineMat(8, { color: 0xffffff })); halo.material.depthWrite = false; halo.renderOrder = 4;
+    const line = new LineSegments2(g, makeLineMat(4.5)); line.renderOrder = 5;
+    trackGroup.add(halo, line); resize();
+  }
+  $('trk-chip').classList.remove('hidden');
+  $('trk-chip-t').textContent = (V.live ? 'Heute' : fmtDate(R.start).split(',').pop().trim()) + (it ? ' · ' + (it.kind === 'run' ? 'Abfahrt ' + it.S.n : it.kind === 'lift' ? liftTitle(lifts[it.r.li]) : 'Ausschnitt') : '');
+  render();
+}
+function liftY(r, p) { const g = liftGeo[r.li]; const [, s] = projLift(g, p.x, p.z); let k = 0; while (k < g.s.length - 2 && g.s[k + 1] < s) k++; const t = (s - g.s[k]) / ((g.s[k + 1] - g.s[k]) || 1); return g.P[k].y + (g.P[k + 1].y - g.P[k].y) * t + 3; }
+function hideTrack() { clearTrack(); trk.shown = null; $('trk-chip').classList.add('hidden'); render(); }
+$('trk-chip-x').onclick = hideTrack;
+$('trk-chip-t').onclick = () => { if (trk.shown) { trk.view = trk.shown; openTrk(); } };
+function fitTrack(R, a, b) {
+  const P = []; const step = Math.max(1, Math.floor((b - a) / 200));
+  for (let i = a; i <= b; i += step) P.push({ x: R.pt[i].x, z: R.pt[i].z, h: R.pt[i].h });
+  P.push({ x: R.pt[b].x, z: R.pt[b].z, h: R.pt[b].h }); fitNodes(P);
+}
+
+// ---------- pill + pocket mode ----------
+function trkUi() {
+  $('trk-pill').classList.toggle('hidden', !trk.on);
+  $('btn-trk').classList.toggle('rec', trk.on);
+  if (!trk.on) return;
+  const R = trkResult();
+  $('trk-pill').innerHTML = `<i class="${trk.paused ? 'p' : ''}"></i>${trk.paused ? 'Pause' : fmtDur((trk.rec.end - trk.rec.start) / 1000)} · ${fmtKm(R ? R.tot.piste : 0)} km · ${R ? R.tot.runs : 0} Abf.`;
+  if (trk.pocket) {
+    const v = curSpeed();
+    $('pk-big').textContent = trk.paused ? 'Pause' : v === null ? '– km/h' : Math.round(v * 3.6) + ' km/h';
+    $('pk-sub').textContent = `${fmtDur((trk.rec.end - trk.rec.start) / 1000)} · ${fmtKm(R.tot.piste)} km · ${R.tot.runs} Abfahrten · ${fmtInt(R.tot.descent)} Tm`;
+    $('pk-clock').textContent = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  }
+  if (!tkSheet.classList.contains('hidden') && !trk.view) renderTrk();
+}
+setInterval(() => { if (trk.on) trkUi(); }, 5000);
+function setPocket(on) {
+  trk.pocket = on; $('pocket').classList.toggle('hidden', !on);
+  if (on) { trkWake(); trkUi(); } else render();
+}
+{ let lastTap = 0; $('pocket').addEventListener('pointerdown', e => { e.preventDefault(); const t = Date.now(); if (t - lastTap < 450) setPocket(false); else { lastTap = t; $('pk-hint').classList.add('blink'); setTimeout(() => $('pk-hint').classList.remove('blink'), 500); } }); }
+document.addEventListener('visibilitychange', () => {
+  if (!trk.on) return;
+  if (document.hidden) saveTrk(); else { trkWake(); if (gps.watch === null || !gps.high) startGps(true); trkUi(); }
+});
+window.addEventListener('pagehide', () => { if (trk.on) saveTrk(); });
+
+// resume an unfinished recording (page reload / browser killed) or open a day from the list
+(async () => {
+  if (!TDB) return;
+  const id = localStorage.getItem('trk:active');
+  if (id) {
+    const rec = await TDB.get(id);
+    if (!rec) localStorage.removeItem('trk:active');
+    else if (rec.areaId === AREA.id && Date.now() - rec.end < 6 * 3600e3) { startTracking(rec); window.__toast && window.__toast('Aufzeichnung läuft weiter.'); }
+    else {
+      localStorage.removeItem('trk:active'); rec.done = true;
+      if (rec.areaId === AREA.id) { const R = analyzeTrack(rec); if (R.N < 10) { await TDB.del(rec.id); } else { rec.summary = summarize(R); await TDB.put(rec); } }
+      else { rec.summary = { start: rec.start / 1000, end: rec.end / 1000, runs: 0, piste: 0, ski: 0, descent: 0, rides: 0, vmax: 0, n: rec.pts.length / 5, pending: true }; await TDB.put(rec); }
+      window.__toast && window.__toast('Die letzte Aufzeichnung wurde beendet und gespeichert.');
+    }
+  }
+  const open = localStorage.getItem('trk:open');
+  if (open) {
+    localStorage.removeItem('trk:open');
+    const rec = await TDB.get(open);
+    if (rec && rec.areaId === AREA.id) {
+      const R = analyzeTrack(rec);
+      if (rec.summary?.pending && R.N >= 10) { rec.summary = summarize(R); TDB.put(rec); }
+      trk.view = { rec, R }; openTrk();
+    }
+  }
+})();
+
+
 // ---------- loop ----------
 const tmp = new THREE.Vector3();
 var needs = true;
@@ -1375,6 +1830,7 @@ var last = 0;
 function loop() {
   requestAnimationFrame(loop);
   const t = clock.getElapsedTime();
+  if (trk.pocket) { if (nav.active && nav.sim) navUpdate(t); return; }   // pocket mode: black screen, no 3D rendering
   let moving;
   if (nav.active) { navUpdate(t); moving = true; }
   else if (stepTween()) moving = true;
@@ -1402,6 +1858,7 @@ function loop() {
 }
 loop();
 
-window.__app = { applySharedMeet, meetLink, xzToLonLat, setHuts, huts, showHut, nav, gps, startNav, stopNav, focusStep, camera, controls, runs, lifts, showRun, showLift, setMode, G, route, computeRoute, setRouting, buildSteps, meet, computeMeet, setTab, fairMeet, placeName };
+window.__hAt = heightAt;
+window.__app = { liftGeo, projLift, trk, sim, analyzeTrack, startTracking, stopTracking, showTrack, applySharedMeet, meetLink, xzToLonLat, setHuts, huts, showHut, nav, gps, startNav, stopNav, focusStep, camera, controls, runs, lifts, showRun, showLift, setMode, G, route, computeRoute, setRouting, buildSteps, meet, computeMeet, setTab, fairMeet, placeName };
 
 }

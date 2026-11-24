@@ -169,6 +169,46 @@
   .sw-btn { width:38px; height:38px; border-radius:50%; border:0; background:#fff; font-size:17px; cursor:pointer; flex:none; box-shadow:0 2px 8px rgba(11,26,42,.12); }
   .wx-chip { border:0; background:#fff; border-radius:999px; padding:5px 10px; display:flex; gap:5px; align-items:center; font:inherit; font-size:14px; cursor:pointer; flex:none; box-shadow:0 2px 8px rgba(11,26,42,.12); }
   .wx-chip small { color:var(--mut); font-size:10.5px; }
+  #trk-pill { position:fixed; left:10px; top:calc(max(10px, env(safe-area-inset-top)) + 70px); z-index:5; border:0; background:#c62828; color:#fff; font:inherit; font-size:12.5px; font-weight:700; padding:6px 11px; border-radius:999px; box-shadow:0 2px 10px rgba(0,0,0,.2); cursor:pointer; display:flex; align-items:center; gap:6px; }
+  #trk-pill i { width:8px; height:8px; border-radius:50%; background:#fff; animation:pulse 1.4s infinite; } #trk-pill i.p { animation:none; opacity:.5; }
+  #trk-pill.hidden { display:none; } body.navi #trk-pill { top:auto; bottom:calc(max(12px, env(safe-area-inset-bottom)) + 150px); }
+  nav button.rec { color:#c62828; } nav button.rec.on { color:#fff; }
+  #trk-chip { position:fixed; left:10px; right:10px; top:calc(max(10px, env(safe-area-inset-top)) + 70px); z-index:4; display:flex; align-items:center; gap:8px; padding:6px 6px 6px 10px; border-radius:12px; font-size:11.5px; }
+  #trk-pill:not(.hidden) ~ #trk-chip { top:calc(max(10px, env(safe-area-inset-top)) + 106px); }
+  #trk-chip.hidden { display:none; } #trk-chip-t { border:0; background:transparent; font:inherit; font-weight:700; font-size:12.5px; padding:0; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
+  .tk-spd { flex:1; color:var(--mut); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:5px; } .tk-spd i { flex:none; width:44px; height:6px; border-radius:3px; background:linear-gradient(90deg,#2e9d4f,#9bc53d,#f2c12e,#f07b24,#d7262b); }
+  #trk-chip-x { border:0; background:transparent; font-size:20px; line-height:1; color:var(--mut); cursor:pointer; padding:0 6px; }
+  #trk { position:fixed; inset:0; background:rgba(11,26,42,.35); display:flex; align-items:flex-end; z-index:10; }
+  #trk.hidden { display:none; }
+  #trk .sheet { width:100%; max-width:520px; margin:10px auto; margin-bottom:max(12px, env(safe-area-inset-bottom)); padding:16px 16px 12px; border-radius:20px; position:relative; max-height:86vh; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  #trk h2 { margin:0 0 10px; font-size:18px; display:flex; align-items:center; gap:8px; } #trk h3 { font-size:13px; margin:14px 0 6px; color:var(--mut); text-transform:uppercase; letter-spacing:.04em; }
+  .tk-rec { font-size:11.5px; background:#c62828; color:#fff; padding:2px 8px; border-radius:999px; } .tk-rec.paused { background:#7b8794; }
+  .tk-test { font-size:10.5px; font-weight:700; background:#fff3d6; color:#7a4a00; padding:1px 6px; border-radius:6px; vertical-align:middle; }
+  .tk-intro { font-size:14px; line-height:1.45; margin:0 0 12px; }
+  .tk-big { width:100%; border:0; background:#c62828; color:#fff; font:inherit; font-size:16px; font-weight:750; padding:14px; border-radius:14px; cursor:pointer; }
+  .tk-note { font-size:12px; color:var(--mut); line-height:1.4; margin:10px 0 0; }
+  .tk-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .tk-t { background:#fff; border:1px solid var(--line); border-radius:12px; padding:8px 6px; text-align:center; } .tk-t b { display:block; font-size:19px; letter-spacing:-.02em; } .tk-t small { font-size:11px; color:var(--mut); }
+  .tk-now { font-size:13.5px; margin:10px 2px 4px; }
+  .tk-row { display:flex; gap:6px; margin-top:8px; } .tk-row .tg { margin-top:0; flex:1; font-size:13px; padding:9px 6px; border-radius:10px; }
+  .tg.danger { color:#c62828; border-color:rgba(198,40,40,.3); }
+  #tk-list { list-style:none; margin:0; padding:0; } #tk-list li { display:flex; align-items:center; gap:8px; padding:10px 4px; border-top:1px solid var(--line); cursor:pointer; font-size:14px; } #tk-list li > div { flex:1; min-width:0; } #tk-list small { display:block; color:var(--mut); font-size:12px; margin-top:2px; } #tk-list li.muted { cursor:default; color:var(--mut); font-size:13px; }
+  .tk-go { color:var(--mut); font-size:20px; }
+  .tk-head { display:flex; align-items:center; gap:8px; margin:-4px 30px 12px 0; } .tk-head small { display:block; color:var(--mut); font-size:12px; } .tk-head b { font-size:16px; }
+  #tk-back { border:1px solid var(--line); background:#fff; width:34px; height:34px; border-radius:10px; font-size:20px; cursor:pointer; flex:none; }
+  .tk-hl { margin-top:10px; background:#fff; border:1px solid var(--line); border-radius:12px; padding:2px 10px; } .tk-hl div { display:flex; justify-content:space-between; gap:10px; padding:7px 0; font-size:13px; border-top:1px solid var(--line); } .tk-hl div:first-child { border-top:0; } .tk-hl div span:first-child { color:var(--mut); flex:none; } .tk-hl div span:last-child { text-align:right; }
+  .tk-bar { display:flex; height:12px; border-radius:6px; overflow:hidden; gap:2px; }
+  .tk-leg { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:11.5px; color:var(--mut); margin-top:6px; } .tk-leg i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:4px; vertical-align:-1px; }
+  .tk-prof { width:100%; height:auto; display:block; background:#fff; border:1px solid var(--line); border-radius:12px; } .tk-prof text { font-size:9px; fill:#7b8794; } .tk-prof path { fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round; } .pf-grid { stroke:rgba(11,26,42,.07); }
+  .tk-prof .pf-s { stroke:#0e6bd8; } .tk-prof .pf-l { stroke:#9aa5b1; stroke-dasharray:3 3; } .tk-prof .pf-p { stroke:#f08a24; }
+  .tk-leg i.pf-s { background:#0e6bd8; } .tk-leg i.pf-l { background:#9aa5b1; } .tk-leg i.pf-p { background:#f08a24; }
+  .tk-times { font-size:12px; color:var(--mut); margin-top:6px; }
+  .tk-tl { list-style:none; margin:0; padding:0; } .tk-tl li { display:flex; gap:10px; padding:8px 2px; border-top:1px solid var(--line); cursor:pointer; font-size:13.5px; } .tk-tl small { display:block; color:var(--mut); font-size:12px; margin-top:1px; line-height:1.35; }
+  .tk-ic { flex:none; width:26px; height:26px; border-radius:50%; display:grid; place-items:center; font-size:12px; font-weight:800; color:#fff; } .tk-ic.run { background:#0e6bd8; } .tk-ic.lift { background:#7d8a97; } .tk-ic.stop { background:#fde7cf; } .tk-ic.gap { background:#e6eaee; color:#7b8794; }
+  #pocket { position:fixed; inset:0; background:#000; z-index:50; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; color:#5f6b76; user-select:none; touch-action:none; }
+  #pocket.hidden { display:none; } #pk-clock { font-size:20px; } #pk-big { font-size:54px; font-weight:800; color:#8a96a1; } #pk-sub { font-size:14px; text-align:center; padding:0 20px; } .pk-rec { font-size:12px; color:#7a2a2a; margin-top:16px; }
+  #pk-hint { position:absolute; bottom:max(28px, env(safe-area-inset-bottom)); font-size:12px; color:#3b434a; transition:color .2s; } #pk-hint.blink { color:#c9d1d8; }
+  nav button { padding-left:3px; padding-right:3px; }
   #wx { position:fixed; inset:0; background:rgba(11,26,42,.35); display:flex; align-items:flex-end; z-index:10; }
   #wx .sheet { width:100%; margin:10px; margin-bottom:max(12px, env(safe-area-inset-bottom)); padding:16px; border-radius:20px; position:relative; max-width:520px; margin-left:auto; margin-right:auto; }
   #wx h2 { margin:0 0 8px; font-size:17px; }
@@ -284,6 +324,7 @@
   <button id="btn-pisten" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18L14 6l-4 7-2-3z"/></svg>Pisten</button>
   <button id="btn-steil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20 20 4M4 20h16M15 20a11 11 0 0 0-3.2-7.8"/></svg>Steilheit</button>
   <button id="btn-route"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="2"/><path d="M18 3a3 3 0 0 0-3 3c0 2.2 3 5 3 5s3-2.8 3-5a3 3 0 0 0-3-3z"/><path d="M8 19h6a3.5 3.5 0 0 0 0-7H10a3.5 3.5 0 0 1 0-7h1"/></svg>Route</button>
+  <button id="btn-trk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Tracker</button>
   <button id="btn-measure"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M6.5 7.5c4 1 3 6 6 7s4 1.5 5 2"/></svg>Messen</button>
   <button id="btn-undo" class="small hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/></svg>Zurück</button>
   <button id="btn-clear" class="small hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>Löschen</button>
@@ -291,6 +332,10 @@
   <button id="btn-reset" class="hidden"></button>
 </nav>
 
+<button id="trk-pill" class="hidden"></button>
+<div id="trk-chip" class="glass hidden"><button id="trk-chip-t"></button><span class="tk-spd"><i></i>0 · 25 · 45 · 65 · 85+ km/h</span><button id="trk-chip-x" aria-label="Spur ausblenden">×</button></div>
+<div id="trk" class="hidden"><div class="sheet glass"><button id="trk-close" class="xbtn" aria-label="Schließen" onclick="document.getElementById('trk').classList.add('hidden')">×</button><div id="trk-body"></div></div></div>
+<div id="pocket" class="hidden"><div id="pk-clock"></div><div id="pk-big"></div><div id="pk-sub"></div><div class="pk-rec">● Aufzeichnung läuft</div><div id="pk-hint">Zum Entsperren zweimal tippen</div></div>
 <div id="wx" class="hidden">
   <div class="sheet glass">
     <button id="wx-close" class="xbtn" aria-label="Schließen">×</button>
