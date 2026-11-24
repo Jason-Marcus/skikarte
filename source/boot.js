@@ -37,7 +37,7 @@ function decodeTile(ab) {
     let name, extent = 4096; const keys = [], vals = [], feats = [];
     msg(v, (f2, v2) => {
       if (f2 === 1) name = td.decode(v2); else if (f2 === 3) keys.push(td.decode(v2)); else if (f2 === 5) extent = v2;
-      else if (f2 === 4) { let val = null; msg(v2, (f3, v3) => { val = f3 === 1 ? td.decode(v3) : (f3 === 7 ? !!v3 : v3); }); vals.push(val); }
+      else if (f2 === 4) { let val = null; msg(v2, (f3, v3) => { val = f3 === 1 ? td.decode(v3) : f3 === 7 ? !!v3 : f3 === 6 ? zz(v3) : v3; }); vals.push(val); }   // 6 = sint (zigzag)
       else if (f2 === 2) feats.push(v2);
     });
     out[name] = feats.map(fb => {
@@ -372,7 +372,7 @@ async function ofmTile(base, z, x, y) {
 }
 function tilesFor(bb, Z) { const a = [], x0 = Math.floor(lon2x(bb.w, Z)), x1 = Math.floor(lon2x(bb.e, Z)), y0 = Math.floor(lat2y(bb.n, Z)), y1 = Math.floor(lat2y(bb.s, Z)); for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) a.push([x, y]); return a; }
 async function loadOsm(bb, onStep) {
-  const base = await ofmTiles(), out = { v: 1, roads: [], paths: [], water: [], rivers: [], places: [], peaks: [], settled: [] };
+  const base = await ofmTiles(), out = { v: 2, roads: [], paths: [], water: [], rivers: [], places: [], peaks: [], settled: [] };
   const inB = p => p[0] >= bb.w && p[0] <= bb.e && p[1] >= bb.s && p[1] <= bb.n;
   const seen = new Set(); let fails = 0;
   const tiles = tilesFor(bb, 13);
@@ -521,7 +521,7 @@ async function start(area) {
     progress('Fertig', 1);
     window.__AREA = area;
     // map layers (loaded on first use, then stored with the area)
-    let osmData = rec?.osm?.v === 1 ? rec.osm : null;
+    let osmData = rec?.osm?.v === 2 ? rec.osm : null;
     window.__osm = async (needBld, onStep) => {
       let changed = false;
       if (!osmData) { osmData = await loadOsm(bbox, onStep); changed = !osmData.partial; }
