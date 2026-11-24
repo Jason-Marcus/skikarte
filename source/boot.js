@@ -138,9 +138,13 @@ async function loadOverpass(bb) {
   const ways = new Map(), runs = [], lifts = [];
   for (const e of j.elements) if (e.type === 'way') ways.set(e.id, e);
   const runTags = new Map();
-  for (const e of j.elements) if (e.type === 'way' && e.tags['piste:type'] === 'downhill' && e.tags.area !== 'yes' && e.geometry?.length > 1) runTags.set(e.id, { ...e.tags, __g: e.geometry });
-  for (const rel of j.elements) if (rel.type === 'relation') for (const m of rel.members || []) {
-    if (m.type !== 'way' || !m.geometry || m.geometry.length < 2) continue;
+  // piste AREAS are not pistes to draw as lines: closed ways (outline of a piste surface) and multipolygon outlines
+  const closed = g => { const a = g[0], z = g[g.length - 1]; return g.length > 3 && a && z && a.lat === z.lat && a.lon === z.lon; };
+  const areaRel = r => ['multipolygon', 'boundary', 'site'].includes(r.tags?.type);
+  const outline = new Set(); for (const rel of j.elements) if (rel.type === 'relation' && areaRel(rel)) for (const m of rel.members || []) if (m.type === 'way') outline.add(m.ref);
+  for (const e of j.elements) if (e.type === 'way' && e.tags['piste:type'] === 'downhill' && e.tags.area !== 'yes' && e.geometry?.length > 1 && !closed(e.geometry) && !outline.has(e.id)) runTags.set(e.id, { ...e.tags, __g: e.geometry });
+  for (const rel of j.elements) if (rel.type === 'relation' && !areaRel(rel)) for (const m of rel.members || []) {
+    if (m.type !== 'way' || !m.geometry || m.geometry.length < 2 || closed(m.geometry) || outline.has(m.ref)) continue;
     const cur = runTags.get(m.ref) || { __g: m.geometry };
     for (const k of ['piste:difficulty', 'piste:name', 'piste:ref', 'name', 'ref']) if (!cur[k] && rel.tags[k]) cur[k] = rel.tags[k];
     runTags.set(m.ref, cur);
@@ -195,7 +199,7 @@ async function markUnclearLifts(lifts) { // lifts from OpenSkiMap carry their OS
 }
 async function loadFeatures(area) {
   const cached = LS.get('sa:' + area.id);
-  if (cached && cached.v === 7 && cached.runs?.length && !cached.partial) return cached;
+  if (cached && cached.v === 8 && cached.runs?.length && !cached.partial) return cached;
   // 1) bounding box from the viewport hint
   const c = area.vh?.center || area.center;
   const R = area.vh ? Math.max(3000, Math.hypot(area.vh.rotatedWidthMeters, area.vh.rotatedHeightMeters) / 2 * 1.25) : 8000;
@@ -251,7 +255,7 @@ async function loadFeatures(area) {
     return ['l', p.name || '', p.ref || '', p.liftType || '', p.capacity || '', f.geometry.coordinates.map(q => [+q[0].toFixed(6), +q[1].toFixed(6)]), '', osm ? +osm.id.slice(4) : 0];
   }, (d, n) => progress(`Lifte laden … ${d}/${n}`, 0.35 + d / n * 0.25))).filter(Boolean);
   try { progress('Liftstatus prüfen …', 0.61); await markUnclearLifts(lifts); } catch (e) { console.warn('lift status check failed', e); for (const l of lifts) l.length = 7; }
-  let data = { v: 7, runs, lifts, src: 'OpenSkiMap' };
+  let data = { v: 8, runs, lifts, src: 'OpenSkiMap' };
   // completeness check against the official OpenSkiMap statistics
   const tileKm = runs.reduce((a, r) => a + lineKm(r[5]), 0);
   if (!runs.length || (area.km && tileKm < area.km * 0.8)) {
@@ -259,7 +263,7 @@ async function loadFeatures(area) {
       const bb = { w: c[0] - dLon, e: c[0] + dLon, s: c[1] - dLat, n: c[1] + dLat };
       const ov = await loadOverpass(bb);
       const ovKm = ov.runs.reduce((a, r) => a + lineKm(r[5]), 0);
-      if (ovKm > tileKm) data = { v: 7, runs: ov.runs, lifts: ov.lifts, src: 'OpenStreetMap (Overpass)' };
+      if (ovKm > tileKm) data = { v: 8, runs: ov.runs, lifts: ov.lifts, src: 'OpenStreetMap (Overpass)' };
     } catch (e) { console.warn('Overpass fallback failed', e); data.partial = true; }
   }
   if (data.partial && !data.runs.length) throw new Error('BUSY');
@@ -520,7 +524,7 @@ async function start(area) {
     if (rec && rec.v === 7) {
       progress('Gespeicherte Karte öffnen …', 0.6);
       ({ data, M, H, F, tex, bbox } = rec);
-      if (data.v !== 7 && navigator.onLine !== false) setTimeout(() => loadFeatures(area).then(nd => { if (nd && !nd.partial && nd.runs.length) { rec.data = nd; IDB.put(rec); } }).catch(() => { }), 8000);
+      if (data.v !== 8 && navigator.onLine !== false) setTimeout(() => loadFeatures(area).then(nd => { if (nd && !nd.partial && nd.runs.length) { rec.data = nd; IDB.put(rec); } }).catch(() => { }), 8000);
     } else {
       data = await loadFeatures(area);
       if (!data.runs.length) throw new Error('Für dieses Skigebiet sind in OpenStreetMap keine Alpinpisten eingetragen.');
