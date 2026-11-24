@@ -1200,9 +1200,14 @@ function stopNav() {
 }
 function navOnGps(x, z) {
   // project position on the route, searching near the last progress so it never jumps backwards over loops
-  let best = null, bd = Infinity;
-  for (const p of nav.pts) { if (p.d < nav.prog - 150 || p.d > nav.prog + 900) continue; const d = Math.hypot(p.x - x, p.z - z); if (d < bd) { bd = d; best = p; } }
-  if (best && bd < 70) { nav.prog = Math.max(nav.prog, best.d); nav.off = 0; }
+  // distance to the route LINE (not only its vertices – long walking links have no points in between)
+  let best = -1, bd = Infinity;
+  for (let k = 0; k < nav.pts.length - 1; k++) {
+    const p = nav.pts[k], q = nav.pts[k + 1]; if (q.d < nav.prog - 150 || p.d > nav.prog + 900) continue;
+    const dx = q.x - p.x, dz = q.z - p.z, L2 = dx * dx + dz * dz, t = L2 ? Math.max(0, Math.min(1, ((x - p.x) * dx + (z - p.z) * dz) / L2)) : 0;
+    const d = Math.hypot(p.x + dx * t - x, p.z + dz * t - z); if (d < bd) { bd = d; best = p.d + (q.d - p.d) * t; }
+  }
+  if (best >= 0 && bd < 70) { nav.prog = Math.max(nav.prog, best); nav.off = 0; }
   else if (++nav.off >= 3) { // off route: recalc from here
     const a = snap(x, z, 300);
     if (a !== null && route.b !== null) { const r2 = dijkstra(a, route.b, route.rank, route.allowDown); if (r2) { route.a = a; route.res = r2; drawRoute(); routeGroup.children.forEach(o => { if (o.geometry === markerGeo) o.visible = false; }); startLbl.el.style.visibility = 'hidden'; prepareNav(r2); if (nav.sim) { sim.d = 0; sim.lat = 0; sim.latT = 0; } window.__toast && window.__toast('Neue Route berechnet.'); } }
