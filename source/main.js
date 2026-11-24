@@ -1691,7 +1691,7 @@ function renderDay(V) {
   if (T.longest) hl.push(['Längste Abfahrt', `Nr. ${T.longest.n} · ${fmtKm(T.longest.dist)} km · ${fmtInt(T.longest.descent)} Tm`]);
   if (T.steepRun !== null && T.steep > 0) hl.push(['Steilste Piste', `${esc(runTitle(runs[T.steepRun]))} · <b style="color:${pctCss(T.steep)}">${Math.round(T.steep)} %</b>`]);
   if (T.vmax > 0) hl.push(['Höchsttempo', `${Math.round(T.vmax * 3.6)} km/h${T.vmaxRun !== null && T.vmaxRun !== undefined ? ' · ' + esc(runTitle(runs[T.vmaxRun])) : ''} · ${fmtClock(T.vmaxT)}`]);
-  if (T.fav) hl.push(['Lieblingslift', `${esc(liftTitle(lifts[T.fav.li]))} · ${T.fav.n}×`]);
+  if (T.fav && T.fav.n >= 2) hl.push(['Lieblingslift', `${esc(liftTitle(lifts[T.fav.li]))} · ${T.fav.n}×`]);
   hl.push(['Höchster Punkt', `${fmtInt(T.maxH)} m · ${fmtClock(T.maxHT)}`]);
   if (T.huts.length) hl.push(['Einkehr', T.huts.map(esc).join(', ')]);
   tkBody.innerHTML = `<div class="tk-head"><button id="tk-back" aria-label="Zurück">‹</button><div><b>${V.live ? 'Bilanz bisher' : 'Skitag ' + fmtDate(R.start)}</b>${rec.test ? ' <span class="tk-test">Test</span>' : ''}<small>${esc(rec.areaName)} · ${fmtClock(R.start)}–${fmtClock(R.end)}</small></div></div>
